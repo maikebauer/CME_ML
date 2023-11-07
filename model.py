@@ -44,15 +44,17 @@ class FrondandDiff(Dataset):
 
     def get_img_and_annotation(self,idx):
 
+        resize_par = 256
+
         # Pick one image.
         img_id   = self.annotated[idx]
         img_info = self.coco_obj.loadImgs([img_id])[0]
         img_file_name = img_info["file_name"]
 
         # Use URL to load image.
-        im = np.asarray(Image.open("/Volumes/PortableSSD/differences/"+img_file_name).convert("L"))/255.0
+        im = np.asarray(Image.open("/Volumes/SSD/differences/"+img_file_name).convert("L"))/255.0
 
-        im = cv2.resize(im  , (256 , 256),interpolation = cv2.INTER_CUBIC)
+        im = cv2.resize(im  , (resize_par , resize_par),interpolation = cv2.INTER_CUBIC)
 
         GT = np.zeros((2,1024,1024))
         annotations = self.coco_obj.getAnnIds(imgIds=img_id)
@@ -61,8 +63,8 @@ class FrondandDiff(Dataset):
                 ann = self.coco_obj.loadAnns(a)
                 GT[int(ann[0]["attributes"]["id"]),:,:]=coco.maskUtils.decode(coco.maskUtils.frPyObjects([ann[0]['segmentation']], 1024,1024))[:,:,0]
        
-        a = cv2.resize(GT[0,:,:]  , (256 , 256),interpolation = cv2.INTER_CUBIC)
-        b = cv2.resize(GT[1,:,:]  , (256 , 256),interpolation = cv2.INTER_CUBIC)
+        a = cv2.resize(GT[0,:,:]  , (resize_par , resize_par),interpolation = cv2.INTER_CUBIC)
+        b = cv2.resize(GT[1,:,:]  , (resize_par , resize_par),interpolation = cv2.INTER_CUBIC)
 
         GT = np.concatenate([a[None,:,:],b[None,:,:]],0)
 
@@ -81,8 +83,109 @@ class FrondandDiff(Dataset):
      
 
 
+class UNet(nn.Module):
+    def __init__(self, in_ch, out_ch):
+        super().__init__()
+        
+        # Encoder
+        # In the encoder, convolutional layers with the Conv2d function are used to extract features from the input image. 
+        # Each block in the encoder consists of two convolutional layers followed by a max-pooling layer, with the exception of the last block which does not include a max-pooling layer.
+        # -------
+        # input: 572x572x3
+
+        self.in_ch = in_ch
+        self.out_ch = out_ch
+         
+        self.e11 = nn.Sequential(*[nn.Conv2d(in_channels=self.in_ch,out_channels=64,kernel_size=3,padding=1),nn.BatchNorm2d(64)])
+        self.e12 = nn.Sequential(*[nn.Conv2d(in_channels=64,out_channels=64,kernel_size=3,padding=1),nn.BatchNorm2d(64)])
+        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2) # output: 284x284x64
+
+        # input: 284x284x64
+        self.e21 = nn.Sequential(*[nn.Conv2d(in_channels=64,out_channels=128,kernel_size=3,padding=1),nn.BatchNorm2d(128)])
+        self.e22 = nn.Sequential(*[nn.Conv2d(in_channels=128,out_channels=128,kernel_size=3,padding=1),nn.BatchNorm2d(128)])
+        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2) # output: 140x140x128
+
+        # input: 140x140x128
+        self.e31 = nn.Sequential(*[nn.Conv2d(in_channels=128,out_channels=256,kernel_size=3,padding=1),nn.BatchNorm2d(256)])
+        self.e32 = nn.Sequential(*[nn.Conv2d(in_channels=256,out_channels=256,kernel_size=3,padding=1),nn.BatchNorm2d(256)])
+        self.pool3 = nn.MaxPool2d(kernel_size=2, stride=2) # output: 68x68x256
+
+        # input: 68x68x256
+        self.e41 = nn.Sequential(*[nn.Conv2d(in_channels=256,out_channels=512,kernel_size=3,padding=1),nn.BatchNorm2d(512)])
+        self.e42 = nn.Sequential(*[nn.Conv2d(in_channels=512,out_channels=512,kernel_size=3,padding=1),nn.BatchNorm2d(512)])
+        self.pool4 = nn.MaxPool2d(kernel_size=2, stride=2) # output: 32x32x512
+
+        # input: 32x32x512
+        self.e51 =  nn.Sequential(*[nn.Conv2d(in_channels=512,out_channels=1024,kernel_size=3,padding=1),nn.BatchNorm2d(1024)])
+        self.e52 = nn.Sequential(*[nn.Conv2d(in_channels=1024,out_channels=1024,kernel_size=3,padding=1),nn.BatchNorm2d(1024)])
 
 
+        # Decoder
+        self.upconv1 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=1024,out_channels=512, kernel_size=2, stride=2),nn.BatchNorm2d(512)])
+        self.d11 = nn.Sequential(*[nn.Conv2d(in_channels=1024,out_channels=512, kernel_size=3, padding=1),nn.BatchNorm2d(512)])
+        self.d12 = nn.Sequential(*[nn.Conv2d(in_channels=512,out_channels=512, kernel_size=3, padding=1),nn.BatchNorm2d(512)])
+
+        self.upconv2 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=512,out_channels=256, kernel_size=2, stride=2),nn.BatchNorm2d(256)])
+        self.d21 = nn.Sequential(*[nn.Conv2d(in_channels=512,out_channels=256, kernel_size=3, padding=1),nn.BatchNorm2d(256)])
+        self.d22 = nn.Sequential(*[nn.Conv2d(in_channels=256,out_channels=256, kernel_size=3, padding=1),nn.BatchNorm2d(256)])
+
+        self.upconv3 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=256,out_channels=128, kernel_size=2, stride=2),nn.BatchNorm2d(128)])
+        self.d31 = nn.Sequential(*[nn.Conv2d(in_channels=256,out_channels=128, kernel_size=3, padding=1),nn.BatchNorm2d(128)])
+        self.d32 = nn.Sequential(*[nn.Conv2d(in_channels=128,out_channels=128, kernel_size=3, padding=1),nn.BatchNorm2d(128)])
+
+        self.upconv4 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=128,out_channels=64, kernel_size=2, stride=2),nn.BatchNorm2d(64)])
+        self.d41 = nn.Sequential(*[nn.Conv2d(in_channels=128,out_channels=64, kernel_size=3, padding=1),nn.BatchNorm2d(64)])
+        self.d42 = nn.Sequential(*[nn.Conv2d(in_channels=64,out_channels=64, kernel_size=3, padding=1),nn.BatchNorm2d(64)])
+
+        # Output layer
+        self.outconv = nn.Conv2d(in_channels=64,out_channels=self.out_ch, kernel_size=1)
+        # self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        # Encoder
+        xe11 =  F.relu(self.e11(x))
+        xe12 =  F.relu(self.e12(xe11))
+        xp1 = self.pool1(xe12)
+
+        xe21 =  F.relu(self.e21(xp1))
+        xe22 =  F.relu(self.e22(xe21))
+        xp2 = self.pool2(xe22)
+
+        xe31 =  F.relu(self.e31(xp2))
+        xe32 =  F.relu(self.e32(xe31))
+        xp3 = self.pool3(xe32)
+
+        xe41 =  F.relu(self.e41(xp3))
+        xe42 =  F.relu(self.e42(xe41))
+        xp4 = self.pool4(xe42)
+
+        xe51 =  F.relu(self.e51(xp4))
+        xe52 =  F.relu(self.e52(xe51))
+        
+        # Decoder
+        xu1 = self.upconv1(xe52)
+        xu11 = torch.cat([xu1, xe42], dim=1)
+        xd11 =  F.relu(self.d11(xu11))
+        xd12 =  F.relu(self.d12(xd11))
+
+        xu2 = self.upconv2(xd12)
+        xu22 = torch.cat([xu2, xe32], dim=1)
+        xd21 =  F.relu(self.d21(xu22))
+        xd22 =  F.relu(self.d22(xd21))
+
+        xu3 = self.upconv3(xd22)
+        xu33 = torch.cat([xu3, xe22], dim=1)
+        xd31 =  F.relu(self.d31(xu33))
+        xd32 =  F.relu(self.d32(xd31))
+
+        xu4 = self.upconv4(xd32)
+        xu44 = torch.cat([xu4, xe12], dim=1)
+        xd41 =  F.relu(self.d41(xu44))
+        xd42 =  F.relu(self.d42(xd41))
+
+        # Output layer
+        out = self.outconv(xd42)
+        return out
 
 
 class CNN3D(nn.Module):
@@ -223,7 +326,9 @@ if __name__ == "__main__":
 
 
 
-    model = CNN3D(1,2).to(device)
+    # model = CNN3D(1,2).to(device)
+    model = UNet(1, 2).to(device)
+
     dataset = FrondandDiff(True)
     # for i in range(0,dataset.__len__()):
     #     im,mask = dataset.__getitem__(i)
@@ -245,7 +350,7 @@ if __name__ == "__main__":
     g_optimizer = optim.Adam(model.parameters(),1e-4)
     pixel_looser= nn.BCELoss()
 
-    for i in range(0,200):
+    for i in range(0,50):
         for data in dataloader:
 
             start = time.time()
@@ -266,7 +371,7 @@ if __name__ == "__main__":
             ax[1][0].imshow(data[0][0][0].detach().cpu().numpy())
             ax[1][1].imshow(pred[0][0].detach().cpu().numpy())
             ax[1][2].imshow(pred[0][1].detach().cpu().numpy())
-            plt.savefig('test'+str(i)+'.png')
+            plt.savefig('test_'+str(i)+'.png')
 
             
             

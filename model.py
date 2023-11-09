@@ -9,33 +9,143 @@ from pycocotools import coco
 import matplotlib.pyplot as plt 
 import numpy as np
 import time 
+from torchvision.transforms import v2
+import sys
 
-
-class FrondandDiff(Dataset):
-    def __init__(self, training=True):
-
-        self.coco_obj = coco.COCO("instances_default.json")
+class SeqImageDataset(Dataset):
+    def __init__(self, dataset_path, label_path, img_transforms=None, sequence_length=3):
         
+        self.img_transforms = img_transforms
+        self.sequence_length = sequence_length
 
-        self.img_ids = self.coco_obj.getImgIds()[:3844]###until last image annotated
-
+        self.coco_obj = coco.COCO(label_path)
         
+        self.img_ids = self.coco_obj.getImgIds()[:3844] ###until last image annotated
 
-        # self.ann_ids = self.coco_obj.getAnnIds(iscrowd=None)
+        self.files = sorted(glob(f'{dataset_path}/*.png'))
+
         self.annotated = []
+
         for a in range(0,len(self.img_ids)):
             anns = self.coco_obj.getAnnIds(imgIds=[self.img_ids[a]])
             if(len(anns)>0):
                  self.annotated.append(a)
-
      
         self.not_annotated = np.setdiff1d(np.arange(0,len(self.img_ids)),np.array(self.annotated))
 
         self.not_annotated = self.not_annotated[np.random.choice(len(self.not_annotated), len(self.annotated))]
 
         self.annotated = list(self.annotated) + list(self.not_annotated)
+
+        print(f'Loaded {len(self.files)} images from {dataset_path} dataset')
+        
+    def __len__(self):
+        return len(self.files) - self.sequence_length
     
 
+    # def __getitem__(self, idx):
+    #     images = [
+    #         torchvision.io.read_image(self.files[idx+i], mode=torchvision.io.ImageReadMode.GRAY) for i in range(self.sequence_length)
+    #     ]
+    #     images = torch.stack(images, dim=0)
+    #     labels = self.labels.iloc[idx : idx + self.sequence_length]            
+
+    #     if self.img_transforms:
+    #         images = self.img_transforms(images)
+            
+    #     return images, labels
+    
+    
+class FrondandDiff(Dataset):
+    def __init__(self, transform=None):
+
+        self.transform = transform
+
+        self.coco_obj = coco.COCO("instances_default.json")
+        
+
+        self.img_ids = self.coco_obj.getImgIds()[:3844]###until last image annotated
+
+        self.annotated = []
+        self.events = []
+
+        event_list = []
+        temp_list_zero = []
+        temp_list_one = []
+
+        a_id_prev = 0
+
+        for a in range(0,len(self.img_ids)):
+            anns = self.coco_obj.getAnnIds(imgIds=[self.img_ids[a]])
+            
+
+            if(len(anns)>0):
+                
+                attr = [self.coco_obj.loadAnns(ids=anns)[i]['attributes']['id'] for i in range(len(anns))]
+                self.annotated.append(a)
+
+                if (self.img_ids[a] - a_id_prev == 1) or (self.img_ids[a] == 0):
+
+                    for atr_id in attr:
+
+                        if atr_id == 0:
+                            temp_list_zero.append(a)
+
+                        elif atr_id == 1:
+                            temp_list_one.append(a)
+
+                elif self.img_ids[a] - a_id_prev > 1:
+
+                    if len(temp_list_zero) > 0:
+                        event_list.append(temp_list_zero)
+                    
+                    if len(temp_list_one) > 0:
+                        event_list.append(temp_list_one)
+
+                    temp_list_zero = []
+                    temp_list_one = []
+                
+                a_id_prev = self.img_ids[a]
+
+        self.events = event_list
+
+        self.not_annotated = np.setdiff1d(np.arange(0,len(self.img_ids)),np.array(self.annotated))
+        
+        seed = 1997
+
+        np.random.seed(seed)
+        self.not_annotated = self.not_annotated[np.random.choice(len(self.not_annotated), len(self.annotated), replace=False)]
+
+        self.annotated = list(self.annotated) + list(self.not_annotated)
+
+        len_train_noevents = int(np.floor(len(self.not_annotated)*0.8))
+
+        seed = 1997
+        np.random.seed(seed)
+        rand_arr_noevent = np.random.choice(int(len(self.not_annotated)), len_train_noevents)
+
+        len_train_events = int(np.floor(len(self.events)*0.8))
+        seed = 1997
+        np.random.seed(seed)
+        rand_arr = np.random.choice(int(len(self.events)), len_train_events)
+
+        train_data = []
+        test_data = []
+
+        for i in np.arange(len(self.not_annotated)):
+            if i in rand_arr_noevent:
+                train_data.append(self.not_annotated[i])
+            else:
+                test_data.append(self.not_annotated[i])
+
+        for i in np.arange(len(self.events)):
+            if i in rand_arr:
+                train_data.extend(self.events[i])
+            else:
+                test_data.extend(self.events[i])
+
+        self.train_data = sorted(train_data)
+        self.test_data = sorted(test_data)
 
         # if(training):
         #     self.annot_paths = self.annot_paths[:int(len(self.annot_paths)*0.7)]
@@ -47,10 +157,29 @@ class FrondandDiff(Dataset):
         resize_par = 256
 
         # Pick one image.
+        
+        # if idx != 0:
+        #     idx_prev = idx-1
+
+        #     img_id_prev   = self.annotated[idx_prev]
+        #     img_info_prev = self.coco_obj.loadImgs([img_id_prev])[0]
+        #     img_file_name_prev = img_info_prev["file_name"]
+
+        #     im_prev = np.asarray(Image.open("/Volumes/SSD/differences/"+img_file_name_prev).convert("L"))/255.0
+
+        #     im_prev = cv2.resize(im_prev  , (resize_par , resize_par),interpolation = cv2.INTER_CUBIC)
+
+        #     annotations_prev = self.coco_obj.getAnnIds(imgIds=img_id_prev)
+
+        #     if(len(annotations_prev)==0):
+        #         im_prev = np.zeros(np.shape(im_prev))
+
+        # else:
+        #     im_prev = np.zeros((1024, 1024))
+
         img_id   = self.annotated[idx]
         img_info = self.coco_obj.loadImgs([img_id])[0]
         img_file_name = img_info["file_name"]
-
         # Use URL to load image.
         im = np.asarray(Image.open("/Volumes/SSD/differences/"+img_file_name).convert("L"))/255.0
 
@@ -58,6 +187,7 @@ class FrondandDiff(Dataset):
 
         GT = np.zeros((2,1024,1024))
         annotations = self.coco_obj.getAnnIds(imgIds=img_id)
+
         if(len(annotations)>0):
             for a in annotations:
                 ann = self.coco_obj.loadAnns(a)
@@ -68,8 +198,22 @@ class FrondandDiff(Dataset):
 
         GT = np.concatenate([a[None,:,:],b[None,:,:]],0)
 
+        # seed = 1997
+        # np.random.seed(seed) 
+        # torch.manual_seed(seed)
 
-        return torch.tensor(im).unsqueeze(0),torch.tensor(GT)
+        # if self.transform:
+        #     im = self.transform(im)
+
+        # np.random.seed(seed) 
+        # torch.manual_seed(seed)
+
+        # if self.transform:
+        #     GT = self.transform(GT)
+
+        # make sure to apply same tranform to both
+
+        return torch.tensor(im).unsqueeze(0), torch.tensor(GT), len(annotations), img_file_name
          
 
 
@@ -80,113 +224,6 @@ class FrondandDiff(Dataset):
        
 
         return self.get_img_and_annotation(index)
-     
-
-
-class UNet(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super().__init__()
-        
-        # Encoder
-        # In the encoder, convolutional layers with the Conv2d function are used to extract features from the input image. 
-        # Each block in the encoder consists of two convolutional layers followed by a max-pooling layer, with the exception of the last block which does not include a max-pooling layer.
-        # -------
-        # input: 572x572x3
-
-        self.in_ch = in_ch
-        self.out_ch = out_ch
-         
-        self.e11 = nn.Sequential(*[nn.Conv2d(in_channels=self.in_ch,out_channels=64,kernel_size=3,padding=1),nn.BatchNorm2d(64)])
-        self.e12 = nn.Sequential(*[nn.Conv2d(in_channels=64,out_channels=64,kernel_size=3,padding=1),nn.BatchNorm2d(64)])
-        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2) # output: 284x284x64
-
-        # input: 284x284x64
-        self.e21 = nn.Sequential(*[nn.Conv2d(in_channels=64,out_channels=128,kernel_size=3,padding=1),nn.BatchNorm2d(128)])
-        self.e22 = nn.Sequential(*[nn.Conv2d(in_channels=128,out_channels=128,kernel_size=3,padding=1),nn.BatchNorm2d(128)])
-        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2) # output: 140x140x128
-
-        # input: 140x140x128
-        self.e31 = nn.Sequential(*[nn.Conv2d(in_channels=128,out_channels=256,kernel_size=3,padding=1),nn.BatchNorm2d(256)])
-        self.e32 = nn.Sequential(*[nn.Conv2d(in_channels=256,out_channels=256,kernel_size=3,padding=1),nn.BatchNorm2d(256)])
-        self.pool3 = nn.MaxPool2d(kernel_size=2, stride=2) # output: 68x68x256
-
-        # input: 68x68x256
-        self.e41 = nn.Sequential(*[nn.Conv2d(in_channels=256,out_channels=512,kernel_size=3,padding=1),nn.BatchNorm2d(512)])
-        self.e42 = nn.Sequential(*[nn.Conv2d(in_channels=512,out_channels=512,kernel_size=3,padding=1),nn.BatchNorm2d(512)])
-        self.pool4 = nn.MaxPool2d(kernel_size=2, stride=2) # output: 32x32x512
-
-        # input: 32x32x512
-        self.e51 =  nn.Sequential(*[nn.Conv2d(in_channels=512,out_channels=1024,kernel_size=3,padding=1),nn.BatchNorm2d(1024)])
-        self.e52 = nn.Sequential(*[nn.Conv2d(in_channels=1024,out_channels=1024,kernel_size=3,padding=1),nn.BatchNorm2d(1024)])
-
-
-        # Decoder
-        self.upconv1 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=1024,out_channels=512, kernel_size=2, stride=2),nn.BatchNorm2d(512)])
-        self.d11 = nn.Sequential(*[nn.Conv2d(in_channels=1024,out_channels=512, kernel_size=3, padding=1),nn.BatchNorm2d(512)])
-        self.d12 = nn.Sequential(*[nn.Conv2d(in_channels=512,out_channels=512, kernel_size=3, padding=1),nn.BatchNorm2d(512)])
-
-        self.upconv2 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=512,out_channels=256, kernel_size=2, stride=2),nn.BatchNorm2d(256)])
-        self.d21 = nn.Sequential(*[nn.Conv2d(in_channels=512,out_channels=256, kernel_size=3, padding=1),nn.BatchNorm2d(256)])
-        self.d22 = nn.Sequential(*[nn.Conv2d(in_channels=256,out_channels=256, kernel_size=3, padding=1),nn.BatchNorm2d(256)])
-
-        self.upconv3 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=256,out_channels=128, kernel_size=2, stride=2),nn.BatchNorm2d(128)])
-        self.d31 = nn.Sequential(*[nn.Conv2d(in_channels=256,out_channels=128, kernel_size=3, padding=1),nn.BatchNorm2d(128)])
-        self.d32 = nn.Sequential(*[nn.Conv2d(in_channels=128,out_channels=128, kernel_size=3, padding=1),nn.BatchNorm2d(128)])
-
-        self.upconv4 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=128,out_channels=64, kernel_size=2, stride=2),nn.BatchNorm2d(64)])
-        self.d41 = nn.Sequential(*[nn.Conv2d(in_channels=128,out_channels=64, kernel_size=3, padding=1),nn.BatchNorm2d(64)])
-        self.d42 = nn.Sequential(*[nn.Conv2d(in_channels=64,out_channels=64, kernel_size=3, padding=1),nn.BatchNorm2d(64)])
-
-        # Output layer
-        self.outconv = nn.Conv2d(in_channels=64,out_channels=self.out_ch, kernel_size=1)
-        # self.sigmoid = nn.Sigmoid()
-
-    def forward(self, x):
-        # Encoder
-        xe11 =  F.relu(self.e11(x))
-        xe12 =  F.relu(self.e12(xe11))
-        xp1 = self.pool1(xe12)
-
-        xe21 =  F.relu(self.e21(xp1))
-        xe22 =  F.relu(self.e22(xe21))
-        xp2 = self.pool2(xe22)
-
-        xe31 =  F.relu(self.e31(xp2))
-        xe32 =  F.relu(self.e32(xe31))
-        xp3 = self.pool3(xe32)
-
-        xe41 =  F.relu(self.e41(xp3))
-        xe42 =  F.relu(self.e42(xe41))
-        xp4 = self.pool4(xe42)
-
-        xe51 =  F.relu(self.e51(xp4))
-        xe52 =  F.relu(self.e52(xe51))
-        
-        # Decoder
-        xu1 = self.upconv1(xe52)
-        xu11 = torch.cat([xu1, xe42], dim=1)
-        xd11 =  F.relu(self.d11(xu11))
-        xd12 =  F.relu(self.d12(xd11))
-
-        xu2 = self.upconv2(xd12)
-        xu22 = torch.cat([xu2, xe32], dim=1)
-        xd21 =  F.relu(self.d21(xu22))
-        xd22 =  F.relu(self.d22(xd21))
-
-        xu3 = self.upconv3(xd22)
-        xu33 = torch.cat([xu3, xe22], dim=1)
-        xd31 =  F.relu(self.d31(xu33))
-        xd32 =  F.relu(self.d32(xd31))
-
-        xu4 = self.upconv4(xd32)
-        xu44 = torch.cat([xu4, xe12], dim=1)
-        xd41 =  F.relu(self.d41(xu44))
-        xd42 =  F.relu(self.d42(xd41))
-
-        # Output layer
-        out = self.outconv(xd42)
-        return out
-
 
 class CNN3D(nn.Module):
     def __init__(self, input_channels, output_channels):
@@ -194,8 +231,8 @@ class CNN3D(nn.Module):
 
         self.input_channels = input_channels
         self.output_channels = output_channels
-    
-     # Encoder layers
+
+        # Encoder layers
 
         self.encoder_conv_00 = nn.Sequential(*[nn.Conv2d(in_channels=self.input_channels,out_channels=64,kernel_size=3,padding=1),nn.BatchNorm2d(64)])
         self.encoder_conv_01 = nn.Sequential(*[nn.Conv2d(in_channels=64,out_channels=64,kernel_size=3,padding=1),nn.BatchNorm2d(64)])
@@ -326,40 +363,52 @@ if __name__ == "__main__":
 
 
 
-    # model = CNN3D(1,2).to(device)
-    model = UNet(1, 2).to(device)
+    model = CNN3D(3,2).to(device)
 
-    dataset = FrondandDiff(True)
-    # for i in range(0,dataset.__len__()):
-    #     im,mask = dataset.__getitem__(i)
-    #     fig,ax = plt.subplots(1,3)
-    #     ax[0].imshow(im)
-    #     ax[1].imshow(mask[0])
-    #     ax[2].imshow(mask[1])
-    #     plt.show()
-    # exit()
-    dataloader = torch.utils.data.DataLoader(
-                                                dataset,
+    # composed = v2.Compose([v2.RandomHorizontalFlip(p=0.5), v2.RandomRotation((0, 360)), v2.RandomVerticalFlip(p=0.5)])
+    # same number cmes train test
+    dataset = FrondandDiff()
+            
+    # # split the data set into train and validation
+    train_indices = dataset.train_data
+    test_indices =  dataset.test_data
+
+    # why are they not in the right order?
+
+    train_dataset = torch.utils.data.Subset(dataset, train_indices)
+    test_dataset = torch.utils.data.Subset(dataset, test_indices)
+    print(train_indices)
+    for data in train_dataset:
+        print(data[-1])
+    train_data_loader = torch.utils.data.DataLoader(
+                                                train_dataset,
                                                 batch_size=1,
                                                 shuffle=False,
                                                 num_workers=1,
                                                 pin_memory=False
                                             )
     
-
     g_optimizer = optim.Adam(model.parameters(),1e-4)
+    # BCEwithlogitloss
     pixel_looser= nn.BCELoss()
 
     for i in range(0,50):
-        for data in dataloader:
+        predictions = torch.tensor(np.zeros((1, 2, 256, 256)))
 
+        for p, data in enumerate(train_data_loader, 1):
+            print()
             start = time.time()
             g_optimizer.zero_grad()
+            input_data = torch.cat([data[0].float().to(device), predictions.float().to(device)], dim=1)
 
-            pred = model(data[0].float().to(device))
+            pred = model(input_data)
 
+            if data[2] > 0:
+                predictions = pred.detach()
+            else:
+                predictions = torch.tensor(np.zeros(np.shape(pred)))
 
-            loss = pixel_looser(pred,data[1].float().to(device))
+            loss = pixel_looser(pred, data[1].float().to(device))
             loss.backward()
             g_optimizer.step()
             print(loss,time.time()-start)
@@ -372,6 +421,7 @@ if __name__ == "__main__":
             ax[1][1].imshow(pred[0][0].detach().cpu().numpy())
             ax[1][2].imshow(pred[0][1].detach().cpu().numpy())
             plt.savefig('test_'+str(i)+'.png')
+            # load model / save model weights, autooptimizer (g_optimizer)
 
             
-            
+    torch.save(model.state_dict(), 'model.pth')

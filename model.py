@@ -12,50 +12,6 @@ import time
 from torchvision.transforms import v2
 import sys
 
-class SeqImageDataset(Dataset):
-    def __init__(self, dataset_path, label_path, img_transforms=None, sequence_length=3):
-        
-        self.img_transforms = img_transforms
-        self.sequence_length = sequence_length
-
-        self.coco_obj = coco.COCO(label_path)
-        
-        self.img_ids = self.coco_obj.getImgIds()[:3844] ###until last image annotated
-
-        self.files = sorted(glob(f'{dataset_path}/*.png'))
-
-        self.annotated = []
-
-        for a in range(0,len(self.img_ids)):
-            anns = self.coco_obj.getAnnIds(imgIds=[self.img_ids[a]])
-            if(len(anns)>0):
-                 self.annotated.append(a)
-     
-        self.not_annotated = np.setdiff1d(np.arange(0,len(self.img_ids)),np.array(self.annotated))
-
-        self.not_annotated = self.not_annotated[np.random.choice(len(self.not_annotated), len(self.annotated))]
-
-        self.annotated = list(self.annotated) + list(self.not_annotated)
-
-        print(f'Loaded {len(self.files)} images from {dataset_path} dataset')
-        
-    def __len__(self):
-        return len(self.files) - self.sequence_length
-    
-
-    # def __getitem__(self, idx):
-    #     images = [
-    #         torchvision.io.read_image(self.files[idx+i], mode=torchvision.io.ImageReadMode.GRAY) for i in range(self.sequence_length)
-    #     ]
-    #     images = torch.stack(images, dim=0)
-    #     labels = self.labels.iloc[idx : idx + self.sequence_length]            
-
-    #     if self.img_transforms:
-    #         images = self.img_transforms(images)
-            
-    #     return images, labels
-    
-    
 class FrondandDiff(Dataset):
     def __init__(self, transform=None):
 

@@ -117,22 +117,25 @@ class FrondandDiff(Dataset):
         self.not_annotated = self.not_annotated[np.random.choice(len(self.not_annotated), len(self.annotated), replace=False)]
 
         self.annotated = list(self.annotated) + list(self.not_annotated)
+        self.annotated = sorted(self.annotated)
 
         len_train_noevents = int(np.floor(len(self.not_annotated)*0.8))
 
         seed = 1997
         np.random.seed(seed)
-        rand_arr_noevent = np.random.choice(int(len(self.not_annotated)), len_train_noevents)
+        rand_arr_noevent = np.random.choice(int(len(self.not_annotated)), len_train_noevents, replace=False)
 
         len_train_events = int(np.floor(len(self.events)*0.8))
+
         seed = 1997
         np.random.seed(seed)
-        rand_arr = np.random.choice(int(len(self.events)), len_train_events)
+        rand_arr = np.random.choice(int(len(self.events)), len_train_events, replace=False)
 
         train_data = []
         test_data = []
 
         for i in np.arange(len(self.not_annotated)):
+            
             if i in rand_arr_noevent:
                 train_data.append(self.not_annotated[i])
             else:
@@ -144,8 +147,20 @@ class FrondandDiff(Dataset):
             else:
                 test_data.extend(self.events[i])
 
-        self.train_data = sorted(train_data)
-        self.test_data = sorted(test_data)
+        train_data_idx = []
+        test_data_idx = []
+        self.annotated = np.array(self.annotated)
+
+        for td in train_data:
+            val = np.where(np.array(self.annotated) == td)[0]
+            train_data_idx.extend(val)
+
+        for td in test_data:
+            val = np.where(np.array(self.annotated) == td)[0]
+            test_data_idx.extend(val)
+
+        self.train_data_idx = sorted(train_data_idx)
+        self.test_data_idx = sorted(test_data_idx)
 
         # if(training):
         #     self.annot_paths = self.annot_paths[:int(len(self.annot_paths)*0.7)]
@@ -157,11 +172,16 @@ class FrondandDiff(Dataset):
         resize_par = 256
 
         # Pick one image.
-        
-        # if idx != 0:
+        # print('idx', idx)
+        # if idx > 1:
         #     idx_prev = idx-1
 
         #     img_id_prev   = self.annotated[idx_prev]
+
+        #     print(idx_prev)
+        #     print(idx)
+        #     print(self.annotated[idx])
+        #     print(self.annotated[idx_prev])
         #     img_info_prev = self.coco_obj.loadImgs([img_id_prev])[0]
         #     img_file_name_prev = img_info_prev["file_name"]
 
@@ -180,6 +200,7 @@ class FrondandDiff(Dataset):
         img_id   = self.annotated[idx]
         img_info = self.coco_obj.loadImgs([img_id])[0]
         img_file_name = img_info["file_name"]
+
         # Use URL to load image.
         im = np.asarray(Image.open("/Volumes/SSD/differences/"+img_file_name).convert("L"))/255.0
 
@@ -213,7 +234,7 @@ class FrondandDiff(Dataset):
 
         # make sure to apply same tranform to both
 
-        return torch.tensor(im).unsqueeze(0), torch.tensor(GT), len(annotations), img_file_name
+        return torch.tensor(im).unsqueeze(0), torch.tensor(GT), len(annotations), img_id
          
 
 
@@ -363,23 +384,21 @@ if __name__ == "__main__":
 
 
 
-    model = CNN3D(3,2).to(device)
+    model = CNN3D(4,2).to(device)
 
     # composed = v2.Compose([v2.RandomHorizontalFlip(p=0.5), v2.RandomRotation((0, 360)), v2.RandomVerticalFlip(p=0.5)])
     # same number cmes train test
     dataset = FrondandDiff()
             
     # # split the data set into train and validation
-    train_indices = dataset.train_data
-    test_indices =  dataset.test_data
+    train_indices = dataset.train_data_idx
+    test_indices =  dataset.test_data_idx
 
     # why are they not in the right order?
 
     train_dataset = torch.utils.data.Subset(dataset, train_indices)
     test_dataset = torch.utils.data.Subset(dataset, test_indices)
-    print(train_indices)
-    for data in train_dataset:
-        print(data[-1])
+
     train_data_loader = torch.utils.data.DataLoader(
                                                 train_dataset,
                                                 batch_size=1,
@@ -392,21 +411,33 @@ if __name__ == "__main__":
     # BCEwithlogitloss
     pixel_looser= nn.BCELoss()
 
-    for i in range(0,50):
+    for i in range(0,200):
         predictions = torch.tensor(np.zeros((1, 2, 256, 256)))
+        im_prev = torch.tensor(np.zeros((1, 1, 256, 256)))
+        ind_prev = -0.5
 
-        for p, data in enumerate(train_data_loader, 1):
-            print()
+        for p, data in enumerate(train_data_loader, 0):
+            
             start = time.time()
             g_optimizer.zero_grad()
-            input_data = torch.cat([data[0].float().to(device), predictions.float().to(device)], dim=1)
+
+            input_data = torch.cat([data[0].float().to(device), predictions.float().to(device), im_prev.float().to(device)], dim=1)
 
             pred = model(input_data)
 
-            if data[2] > 0:
+            if (data[2] > 0) & ((data[3] - ind_prev) == 1.):
                 predictions = pred.detach()
+                im_prev = data[0].detach()
+
+            elif (data[2] > 0) & (ind_prev == -0.5):
+                predictions = pred.detach()
+                im_prev = data[0].detach()
+
             else:
                 predictions = torch.tensor(np.zeros(np.shape(pred)))
+                im_prev = torch.tensor(np.zeros(np.shape(data[0])))
+
+            ind_prev = float(data[3].detach())
 
             loss = pixel_looser(pred, data[1].float().to(device))
             loss.backward()

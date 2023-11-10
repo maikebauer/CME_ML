@@ -11,6 +11,7 @@ import numpy as np
 import time 
 from torchvision.transforms import v2
 import sys
+import evaluation
 
 class FrondandDiff(Dataset):
     def __init__(self, transform=None):
@@ -303,34 +304,27 @@ class CNN3D(nn.Module):
         # return self.sigmoid(x_00d)
     
 
+def train():
 
-
-if __name__ == "__main__":
     device = torch.device("cpu")
+
     if(torch.backends.mps.is_available()):
         device = torch.device("mps")
+
     elif(torch.cuda.is_available()):
         device = torch.device("cuda")
-
-
 
     model = CNN3D(4,2).to(device)
 
     # composed = v2.Compose([v2.RandomHorizontalFlip(p=0.5), v2.RandomRotation((0, 360)), v2.RandomVerticalFlip(p=0.5)])
-    # same number cmes train test
     dataset = FrondandDiff()
             
-    # # split the data set into train and validation
-    train_indices = dataset.train_data_idx
-    test_indices =  dataset.test_data_idx
+    indices = dataset.train_data_idx
 
-    # why are they not in the right order?
+    dataset_sub = torch.utils.data.Subset(dataset, indices)
 
-    train_dataset = torch.utils.data.Subset(dataset, train_indices)
-    test_dataset = torch.utils.data.Subset(dataset, test_indices)
-
-    train_data_loader = torch.utils.data.DataLoader(
-                                                train_dataset,
+    data_loader = torch.utils.data.DataLoader(
+                                                dataset_sub,
                                                 batch_size=1,
                                                 shuffle=False,
                                                 num_workers=1,
@@ -348,12 +342,12 @@ if __name__ == "__main__":
 
     num_iter = 200
 
-    for i in range(0, num_iter):
+    for epoch in range(0, num_iter):
         predictions = torch.tensor(np.zeros((1, 2, width, height)))
         im_prev = torch.tensor(np.zeros((1, 1, width, height)))
         ind_prev = -0.5
 
-        for p, data in enumerate(train_data_loader, 0):
+        for p, data in enumerate(data_loader, 0):
             
             start = time.time()
             g_optimizer.zero_grad()
@@ -388,8 +382,67 @@ if __name__ == "__main__":
             ax[1][0].imshow(data[0][0][0].detach().cpu().numpy())
             ax[1][1].imshow(pred[0][0].detach().cpu().numpy())
             ax[1][2].imshow(pred[0][1].detach().cpu().numpy())
-            plt.savefig('test_'+str(i)+'.png')
-            # load model / save model weights, autooptimizer (g_optimizer)
+            plt.savefig('test_'+str(epoch)+'.png')
 
             
     torch.save(model.state_dict(), 'model.pth')
+
+
+def test():
+
+    device = torch.device("cpu")
+
+    if(torch.backends.mps.is_available()):
+        device = torch.device("mps")
+
+    elif(torch.cuda.is_available()):
+        device = torch.device("cuda")
+
+    model = CNN3D(4,2).to(device)
+
+    # composed = v2.Compose([v2.RandomHorizontalFlip(p=0.5), v2.RandomRotation((0, 360)), v2.RandomVerticalFlip(p=0.5)])
+    dataset = FrondandDiff()
+            
+    indices = dataset.test_data_idx
+
+    dataset_sub = torch.utils.data.Subset(dataset, indices)
+
+    data_loader = torch.utils.data.DataLoader(
+                                                dataset_sub,
+                                                batch_size=1,
+                                                shuffle=False,
+                                                num_workers=1,
+                                                pin_memory=False
+                                            )
+
+    width = 1024
+    height = 1024
+
+    predictions = torch.tensor(np.zeros((1, 2, width, height)))
+    im_prev = torch.tensor(np.zeros((1, 1, width, height)))
+    ind_prev = -0.5
+
+    for p, data in enumerate(data_loader, 0):
+        
+        input_data = torch.cat([data[0].float().to(device), predictions.float().to(device), im_prev.float().to(device)], dim=1)
+
+        pred = model(input_data)
+        evaluation.evaluate(pred[0].numpy(),data[1][0].numpy())
+
+        if (data[2] > 0) & ((data[3] - ind_prev) == 1.):
+            predictions = pred.detach()
+            im_prev = data[0].detach()
+
+        elif (data[2] > 0) & (ind_prev == -0.5):
+            predictions = pred.detach()
+            im_prev = data[0].detach()
+
+        else:
+            predictions = torch.tensor(np.zeros(np.shape(pred)))
+            im_prev = torch.tensor(np.zeros(np.shape(data[0])))
+
+        ind_prev = float(data[3].detach())
+
+if __name__ == "__main__":
+
+    train()

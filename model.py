@@ -161,41 +161,12 @@ class FrondandDiff(Dataset):
 
         self.train_data_idx = sorted(train_data_idx)
         self.test_data_idx = sorted(test_data_idx)
-
-        # if(training):
-        #     self.annot_paths = self.annot_paths[:int(len(self.annot_paths)*0.7)]
         
-    
 
     def get_img_and_annotation(self,idx):
 
-        resize_par = 256
-
-        # Pick one image.
-        # print('idx', idx)
-        # if idx > 1:
-        #     idx_prev = idx-1
-
-        #     img_id_prev   = self.annotated[idx_prev]
-
-        #     print(idx_prev)
-        #     print(idx)
-        #     print(self.annotated[idx])
-        #     print(self.annotated[idx_prev])
-        #     img_info_prev = self.coco_obj.loadImgs([img_id_prev])[0]
-        #     img_file_name_prev = img_info_prev["file_name"]
-
-        #     im_prev = np.asarray(Image.open("/Volumes/SSD/differences/"+img_file_name_prev).convert("L"))/255.0
-
-        #     im_prev = cv2.resize(im_prev  , (resize_par , resize_par),interpolation = cv2.INTER_CUBIC)
-
-        #     annotations_prev = self.coco_obj.getAnnIds(imgIds=img_id_prev)
-
-        #     if(len(annotations_prev)==0):
-        #         im_prev = np.zeros(np.shape(im_prev))
-
-        # else:
-        #     im_prev = np.zeros((1024, 1024))
+        width_par = 1024
+        height_par = 1024
 
         img_id   = self.annotated[idx]
         img_info = self.coco_obj.loadImgs([img_id])[0]
@@ -204,7 +175,7 @@ class FrondandDiff(Dataset):
         # Use URL to load image.
         im = np.asarray(Image.open("/Volumes/SSD/differences/"+img_file_name).convert("L"))/255.0
 
-        im = cv2.resize(im  , (resize_par , resize_par),interpolation = cv2.INTER_CUBIC)
+        # im = cv2.resize(im  , (resize_par , resize_par),interpolation = cv2.INTER_CUBIC)
 
         GT = np.zeros((2,1024,1024))
         annotations = self.coco_obj.getAnnIds(imgIds=img_id)
@@ -212,10 +183,13 @@ class FrondandDiff(Dataset):
         if(len(annotations)>0):
             for a in annotations:
                 ann = self.coco_obj.loadAnns(a)
-                GT[int(ann[0]["attributes"]["id"]),:,:]=coco.maskUtils.decode(coco.maskUtils.frPyObjects([ann[0]['segmentation']], 1024,1024))[:,:,0]
+                GT[int(ann[0]["attributes"]["id"]),:,:]=coco.maskUtils.decode(coco.maskUtils.frPyObjects([ann[0]['segmentation']], width_par, height_par))[:,:,0]
        
-        a = cv2.resize(GT[0,:,:]  , (resize_par , resize_par),interpolation = cv2.INTER_CUBIC)
-        b = cv2.resize(GT[1,:,:]  , (resize_par , resize_par),interpolation = cv2.INTER_CUBIC)
+        # a = cv2.resize(GT[0,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
+        # b = cv2.resize(GT[1,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
+
+        a = GT[0,:,:].copy()
+        b = GT[1,:,:].copy()
 
         GT = np.concatenate([a[None,:,:],b[None,:,:]],0)
 
@@ -369,8 +343,8 @@ class CNN3D(nn.Module):
         x_01d = F.relu(self.decoder_convtr_01(x_0d))
         x_00d = self.decoder_convtr_00(x_01d)
 
-
-        return self.sigmoid(x_00d)
+        return x_00d
+        # return self.sigmoid(x_00d)
     
 
 
@@ -408,12 +382,19 @@ if __name__ == "__main__":
                                             )
     
     g_optimizer = optim.Adam(model.parameters(),1e-4)
-    # BCEwithlogitloss
-    pixel_looser= nn.BCELoss()
 
-    for i in range(0,200):
-        predictions = torch.tensor(np.zeros((1, 2, 256, 256)))
-        im_prev = torch.tensor(np.zeros((1, 1, 256, 256)))
+    pixel_looser= nn.BCEWithLogitsLoss()
+
+    # pixel_looser= nn.BCELoss()
+
+    width = 1024
+    height = 1024
+
+    num_iter = 200
+
+    for i in range(0, num_iter):
+        predictions = torch.tensor(np.zeros((1, 2, width, height)))
+        im_prev = torch.tensor(np.zeros((1, 1, width, height)))
         ind_prev = -0.5
 
         for p, data in enumerate(train_data_loader, 0):

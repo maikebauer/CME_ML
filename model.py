@@ -106,14 +106,15 @@ class FrondandDiff(Dataset):
 
         train_data_idx = []
         test_data_idx = []
+        
         self.annotated = np.array(self.annotated)
 
         for td in train_data:
-            val = np.where(np.array(self.annotated) == td)[0]
+            val = np.where(self.annotated == td)[0]
             train_data_idx.extend(val)
 
         for td in test_data:
-            val = np.where(np.array(self.annotated) == td)[0]
+            val = np.where(self.annotated == td)[0]
             test_data_idx.extend(val)
 
         self.train_data_idx = sorted(train_data_idx)
@@ -122,8 +123,8 @@ class FrondandDiff(Dataset):
 
     def get_img_and_annotation(self,idx):
 
-        width_par = 1024
-        height_par = 1024
+        width_par = 256
+        height_par = 256
 
         img_id   = self.annotated[idx]
         img_info = self.coco_obj.loadImgs([img_id])[0]
@@ -132,7 +133,7 @@ class FrondandDiff(Dataset):
         # Use URL to load image.
         im = np.asarray(Image.open("/Volumes/SSD/differences/"+img_file_name).convert("L"))/255.0
 
-        # im = cv2.resize(im  , (resize_par , resize_par),interpolation = cv2.INTER_CUBIC)
+        im = cv2.resize(im  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
 
         GT = np.zeros((2,1024,1024))
         annotations = self.coco_obj.getAnnIds(imgIds=img_id)
@@ -140,13 +141,13 @@ class FrondandDiff(Dataset):
         if(len(annotations)>0):
             for a in annotations:
                 ann = self.coco_obj.loadAnns(a)
-                GT[int(ann[0]["attributes"]["id"]),:,:]=coco.maskUtils.decode(coco.maskUtils.frPyObjects([ann[0]['segmentation']], width_par, height_par))[:,:,0]
+                GT[int(ann[0]["attributes"]["id"]),:,:]=coco.maskUtils.decode(coco.maskUtils.frPyObjects([ann[0]['segmentation']], 1024, 1024))[:,:,0]
        
-        # a = cv2.resize(GT[0,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
-        # b = cv2.resize(GT[1,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
+        a = cv2.resize(GT[0,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
+        b = cv2.resize(GT[1,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
 
-        a = GT[0,:,:].copy()
-        b = GT[1,:,:].copy()
+        # a = GT[0,:,:]
+        # b = GT[1,:,:]
 
         GT = np.concatenate([a[None,:,:],b[None,:,:]],0)
 
@@ -176,6 +177,7 @@ class FrondandDiff(Dataset):
        
 
         return self.get_img_and_annotation(index)
+
 
 class CNN3D(nn.Module):
     def __init__(self, input_channels, output_channels):
@@ -323,11 +325,14 @@ def train():
 
     dataset_sub = torch.utils.data.Subset(dataset, indices)
 
+    batch_size = 1
+    num_workers = 1
+
     data_loader = torch.utils.data.DataLoader(
                                                 dataset_sub,
-                                                batch_size=1,
+                                                batch_size=batch_size,
                                                 shuffle=False,
-                                                num_workers=1,
+                                                num_workers=num_workers,
                                                 pin_memory=False
                                             )
     
@@ -337,23 +342,21 @@ def train():
 
     # pixel_looser= nn.BCELoss()
 
-    width = 1024
-    height = 1024
+    width = 256
+    height = 256
 
     num_iter = 200
 
     for epoch in range(0, num_iter):
-        predictions = torch.tensor(np.zeros((1, 2, width, height)))
-        im_prev = torch.tensor(np.zeros((1, 1, width, height)))
+        predictions = torch.tensor(np.zeros((1*batch_size, 2, width, height)))
+        im_prev = torch.tensor(np.zeros((1*batch_size, 1, width, height)))
         ind_prev = -0.5
 
         for p, data in enumerate(data_loader, 0):
             
             start = time.time()
             g_optimizer.zero_grad()
-
             input_data = torch.cat([data[0].float().to(device), predictions.float().to(device), im_prev.float().to(device)], dim=1)
-
             pred = model(input_data)
 
             if (data[2] > 0) & ((data[3] - ind_prev) == 1.):
@@ -373,7 +376,7 @@ def train():
             loss = pixel_looser(pred, data[1].float().to(device))
             loss.backward()
             g_optimizer.step()
-            print(loss,time.time()-start)
+            # print(loss,time.time()-start)
 
             fig,ax = plt.subplots(2,3)
             ax[0][0].imshow(data[0][0][0].detach().cpu().numpy())
@@ -383,9 +386,9 @@ def train():
             ax[1][1].imshow(pred[0][0].detach().cpu().numpy())
             ax[1][2].imshow(pred[0][1].detach().cpu().numpy())
             plt.savefig('test_'+str(epoch)+'.png')
-
+            plt.close()
             
-    torch.save(model.state_dict(), 'model.pth')
+        torch.save(model.state_dict(), 'model.pth')
 
 
 def test():
@@ -409,14 +412,14 @@ def test():
 
     data_loader = torch.utils.data.DataLoader(
                                                 dataset_sub,
-                                                batch_size=1,
+                                                batch_size=4,
                                                 shuffle=False,
-                                                num_workers=1,
+                                                num_workers=2,
                                                 pin_memory=False
                                             )
 
-    width = 1024
-    height = 1024
+    width = 256
+    height = 256
 
     predictions = torch.tensor(np.zeros((1, 2, width, height)))
     im_prev = torch.tensor(np.zeros((1, 1, width, height)))

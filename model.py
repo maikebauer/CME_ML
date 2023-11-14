@@ -127,17 +127,18 @@ class FrondandDiff(Dataset):
 
     def get_img_and_annotation(self,idx):
 
-        width_par = 1024
-        height_par = 1024
+        width_par = 256
+        height_par = 256
 
         img_id   = self.img_ids[idx]
         img_info = self.coco_obj.loadImgs([img_id])[0]
         img_file_name = img_info["file_name"]
+        
 
         # Use URL to load image.
         im = np.asarray(Image.open("/Volumes/SSD/differences/"+img_file_name).convert("L"))/255.0
 
-        # im = cv2.resize(im  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
+        im = cv2.resize(im  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
 
         GT = np.zeros((2,1024,1024))
         annotations = self.coco_obj.getAnnIds(imgIds=img_id)
@@ -147,11 +148,11 @@ class FrondandDiff(Dataset):
                 ann = self.coco_obj.loadAnns(a)
                 GT[int(ann[0]["attributes"]["id"]),:,:]=coco.maskUtils.decode(coco.maskUtils.frPyObjects([ann[0]['segmentation']], 1024, 1024))[:,:,0]
 
-        # a = cv2.resize(GT[0,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
-        # b = cv2.resize(GT[1,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
+        a = cv2.resize(GT[0,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
+        b = cv2.resize(GT[1,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
 
-        a = GT[0,:,:]
-        b = GT[1,:,:]
+        # a = GT[0,:,:]
+        # b = GT[1,:,:]
 
         GT = np.concatenate([a[None,:,:],b[None,:,:]],0)
 
@@ -345,52 +346,73 @@ def train():
 
     # pixel_looser= nn.BCELoss()
 
-    width = 1024
-    height = 1024
+    width = 256
+    height = 256
 
     num_iter = 200
 
     for epoch in range(0, num_iter):
-        predictions = torch.tensor(np.zeros((1*batch_size, 2, width, height)))
-        im_prev = torch.tensor(np.zeros((1*batch_size, 1, width, height)))
-        ind_prev = -0.5
+        ind_prev = 0
 
         for p, data in enumerate(data_loader, 0):
             
             start = time.time()
             g_optimizer.zero_grad()
-            input_data = torch.cat([data[0].float().to(device), predictions.float().to(device), im_prev.float().to(device)], dim=1)
-            pred = model(input_data)
 
-            if (data[2] > 0) & ((data[3] - ind_prev) == 1.):
-                predictions = pred.detach()
-                im_prev = data[0].detach()
+            #data[3] = img_index
+            #data[2] = number of annotations
 
-            elif (data[2] > 0) & (ind_prev == -0.5):
-                predictions = pred.detach()
-                im_prev = data[0].detach()
+            if ((data[3] - ind_prev) == 1.) & (ind_prev != 0):
+                pass
+
+            elif ind_prev == 0:
+                predictions = torch.tensor(np.zeros((1*batch_size, 2, width, height)))
+                im_prev = torch.tensor(np.zeros((1*batch_size, 1, width, height)))    
 
             else:
                 predictions = torch.tensor(np.zeros(np.shape(pred)))
-                im_prev = torch.tensor(np.zeros(np.shape(data[0])))
+                im_prev = torch.tensor(np.zeros(np.shape(data[0])))  
 
-            ind_prev = float(data[3].detach())
+            input_data = torch.cat([data[0].float().to(device), predictions.float().to(device), im_prev.float().to(device)], dim=1)
+            pred = model(input_data)
+
+            # print('ann: ', data[2])
+            # print('ind: ', data[3])
+            # print('ind_prev: ', ind_prev)
+            # print(str(epoch)+ '_' + str(p))
+            # print('***************')
 
             loss = pixel_looser(pred, data[1].float().to(device))
             loss.backward()
             g_optimizer.step()
-            # print(loss,time.time()-start)
-
-            fig,ax = plt.subplots(2,3)
-            ax[0][0].imshow(data[0][0][0].detach().cpu().numpy())
-            ax[0][1].imshow(data[1][0][0].detach().cpu().numpy())
-            ax[0][2].imshow(data[1][0][1].detach().cpu().numpy())
-            ax[1][0].imshow(data[0][0][0].detach().cpu().numpy())
-            ax[1][1].imshow(pred[0][0].detach().cpu().numpy())
-            ax[1][2].imshow(pred[0][1].detach().cpu().numpy())
-            plt.savefig('test_'+str(epoch)+'.png')
-            plt.close()
+            ind_prev = float(data[3].detach())
             
+            #print(loss,time.time()-start)
+
+
+            #fig,ax = plt.subplots(3,3)
+            #ax[0][0].imshow(data[0][0][0].detach().cpu().numpy()) #image
+            #ax[0][1].imshow(data[1][0][0].detach().cpu().numpy()) #mask0
+            #ax[0][2].imshow(data[1][0][1].detach().cpu().numpy()) #mask1
+            #ax[1][0].imshow(data[0][0][0].detach().cpu().numpy()) 
+            #ax[1][1].imshow(pred[0][0].detach().cpu().numpy()) #mask0
+            #ax[1][2].imshow(pred[0][1].detach().cpu().numpy()) #mask1
+            #ax[2][0].imshow(data[0][0][0].detach().cpu().numpy()) 
+            #ax[2][1].imshow(im_prev[0][0]) #mask0
+            #ax[2][2].imshow(predictions[0][0]) #mask1
+
+            #plt.savefig('test_'+str(epoch)+'_'+str(p)+'.png')
+            #plt.close()
+
+            if (data[2] > 0):
+
+                predictions = pred.detach().cpu()
+                im_prev = data[0].detach()
+
+            else:
+                predictions = torch.tensor(np.zeros(np.shape(pred)))
+                im_prev = torch.tensor(np.zeros(np.shape(data[0])))  
+
         torch.save(model.state_dict(), 'model.pth')
 
 
@@ -425,14 +447,23 @@ def test():
                                                 pin_memory=False
                                             )
 
-    width = 1024
-    height = 1024
+    width = 256
+    height = 256
 
-    predictions = torch.tensor(np.zeros((1*batch_size, 2, width, height)))
-    im_prev = torch.tensor(np.zeros((1*batch_size, 1, width, height)))
     ind_prev = -0.5
 
     for p, data in enumerate(data_loader, 0):
+
+        if ((data[3] - ind_prev) == 1.) & (p != 0):
+            pass
+
+        elif p == 0:
+            predictions = torch.tensor(np.zeros((1*batch_size, 2, width, height)))
+            im_prev = torch.tensor(np.zeros((1*batch_size, 1, width, height)))    
+
+        else:
+            predictions = torch.tensor(np.zeros(np.shape(pred)))
+            im_prev = torch.tensor(np.zeros(np.shape(data[0])))  
         
         input_data = torch.cat([data[0].float().to(device), predictions.float().to(device), im_prev.float().to(device)], dim=1)
 
@@ -440,12 +471,9 @@ def test():
 
         evaluation.evaluate(pred[0].cpu().detach().numpy(),data[1][0].numpy())
 
-        if (data[2] > 0) & ((data[3] - ind_prev) == 1.):
-            predictions = pred.detach()
-            im_prev = data[0].detach()
+        if (data[2] > 0):
 
-        elif (data[2] > 0) & (ind_prev == -0.5):
-            predictions = pred.detach()
+            predictions = pred.detach().cpu()
             im_prev = data[0].detach()
 
         else:

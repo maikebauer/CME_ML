@@ -90,7 +90,7 @@ def evaluate(pred,gt):
             precision,recall,TP,FP,TN,FN = precision_recall(mask,gt[0]) #precision recall at different thresholds for doing a precision recall curve plot
             iou = IoU(mask,gt[0]) ## main metric to look at, take the mean over dataset or over thresholds 
             acc = Accuracy(mask,gt[0]) #no need to explain
-            metrics.append(kapa,precision,recall,iou,acc)
+            metrics.append([kapa,precision,recall,iou,acc])
     return metrics
 
 

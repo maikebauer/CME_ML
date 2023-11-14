@@ -27,42 +27,59 @@ class FrondandDiff(Dataset):
         self.events = []
 
         event_list = []
-        temp_list_zero = []
-        temp_list_one = []
+        temp_list = []
+
+        # temp_list_zero = []
+        # temp_list_one = []
 
         a_id_prev = 0
 
-        for a in range(0,len(self.img_ids)):
+        for a in range(0, len(self.img_ids)):
             anns = self.coco_obj.getAnnIds(imgIds=[self.img_ids[a]])
             
 
             if(len(anns)>0):
-                
-                attr = [self.coco_obj.loadAnns(ids=anns)[i]['attributes']['id'] for i in range(len(anns))]
+                # attr = [self.coco_obj.loadAnns(ids=anns)[i]['attributes']['id'] for i in range(len(anns))]
                 self.annotated.append(a)
 
-                if (self.img_ids[a] - a_id_prev == 1) or (self.img_ids[a] == 0):
+                if (self.img_ids[a] - a_id_prev == 1) or (a_id_prev == 0):
 
-                    for atr_id in attr:
+                    # for atr_id in attr:
 
-                        if atr_id == 0:
-                            temp_list_zero.append(a)
+                    #     if atr_id == 0:
+                    #         temp_list_zero.append(a)
 
-                        elif atr_id == 1:
-                            temp_list_one.append(a)
+                    #     elif atr_id == 1:
+                    #         temp_list_one.append(a)
 
-                elif self.img_ids[a] - a_id_prev > 1:
+                    temp_list.append(a)
 
-                    if len(temp_list_zero) > 0:
-                        event_list.append(temp_list_zero)
+                elif (self.img_ids[a] - a_id_prev) > 1:
+
+                    # if len(temp_list_zero) > 0:
+                    #     event_list.append(temp_list_zero)
                     
-                    if len(temp_list_one) > 0:
-                        event_list.append(temp_list_one)
+                    # if len(temp_list_one) > 0:
+                    #     event_list.append(temp_list_one)
 
-                    temp_list_zero = []
-                    temp_list_one = []
-                
+                    # temp_list_zero = []
+                    # temp_list_one = []
+
+                    if len(temp_list) > 0:
+                        event_list.append(temp_list)
+
+                    temp_list = []
+
+                    # for atr_id in attr:
+
+                    #     if atr_id == 0:
+                    #         temp_list_zero.append(a)
+
+                    #     elif atr_id == 1:
+                    #         temp_list_one.append(a)
+         
                 a_id_prev = self.img_ids[a]
+
 
         self.events = event_list
 
@@ -104,36 +121,23 @@ class FrondandDiff(Dataset):
             else:
                 test_data.extend(self.events[i])
 
-        train_data_idx = []
-        test_data_idx = []
-        
-        self.annotated = np.array(self.annotated)
-
-        for td in train_data:
-            val = np.where(self.annotated == td)[0]
-            train_data_idx.extend(val)
-
-        for td in test_data:
-            val = np.where(self.annotated == td)[0]
-            test_data_idx.extend(val)
-
-        self.train_data_idx = sorted(train_data_idx)
-        self.test_data_idx = sorted(test_data_idx)
+        self.train_data_idx = sorted(train_data)
+        self.test_data_idx = sorted(test_data)
         
 
     def get_img_and_annotation(self,idx):
 
-        width_par = 256
-        height_par = 256
+        width_par = 1024
+        height_par = 1024
 
-        img_id   = self.annotated[idx]
+        img_id   = self.img_ids[idx]
         img_info = self.coco_obj.loadImgs([img_id])[0]
         img_file_name = img_info["file_name"]
 
         # Use URL to load image.
         im = np.asarray(Image.open("/Volumes/SSD/differences/"+img_file_name).convert("L"))/255.0
 
-        im = cv2.resize(im  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
+        # im = cv2.resize(im  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
 
         GT = np.zeros((2,1024,1024))
         annotations = self.coco_obj.getAnnIds(imgIds=img_id)
@@ -142,12 +146,12 @@ class FrondandDiff(Dataset):
             for a in annotations:
                 ann = self.coco_obj.loadAnns(a)
                 GT[int(ann[0]["attributes"]["id"]),:,:]=coco.maskUtils.decode(coco.maskUtils.frPyObjects([ann[0]['segmentation']], 1024, 1024))[:,:,0]
-       
-        a = cv2.resize(GT[0,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
-        b = cv2.resize(GT[1,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
 
-        # a = GT[0,:,:]
-        # b = GT[1,:,:]
+        # a = cv2.resize(GT[0,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
+        # b = cv2.resize(GT[1,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
+
+        a = GT[0,:,:]
+        b = GT[1,:,:]
 
         GT = np.concatenate([a[None,:,:],b[None,:,:]],0)
 
@@ -175,7 +179,6 @@ class FrondandDiff(Dataset):
 
     def __getitem__(self, index):
        
-
         return self.get_img_and_annotation(index)
 
 
@@ -342,8 +345,8 @@ def train():
 
     # pixel_looser= nn.BCELoss()
 
-    width = 256
-    height = 256
+    width = 1024
+    height = 1024
 
     num_iter = 200
 
@@ -402,6 +405,7 @@ def test():
         device = torch.device("cuda")
 
     model = CNN3D(4,2).to(device)
+    model.load_state_dict(torch.load('model.pth', map_location=device))
 
     # composed = v2.Compose([v2.RandomHorizontalFlip(p=0.5), v2.RandomRotation((0, 360)), v2.RandomVerticalFlip(p=0.5)])
     dataset = FrondandDiff()
@@ -410,19 +414,22 @@ def test():
 
     dataset_sub = torch.utils.data.Subset(dataset, indices)
 
+    batch_size = 1
+    num_workers = 1
+
     data_loader = torch.utils.data.DataLoader(
                                                 dataset_sub,
-                                                batch_size=4,
+                                                batch_size=batch_size,
                                                 shuffle=False,
-                                                num_workers=2,
+                                                num_workers=num_workers,
                                                 pin_memory=False
                                             )
 
-    width = 256
-    height = 256
+    width = 1024
+    height = 1024
 
-    predictions = torch.tensor(np.zeros((1, 2, width, height)))
-    im_prev = torch.tensor(np.zeros((1, 1, width, height)))
+    predictions = torch.tensor(np.zeros((1*batch_size, 2, width, height)))
+    im_prev = torch.tensor(np.zeros((1*batch_size, 1, width, height)))
     ind_prev = -0.5
 
     for p, data in enumerate(data_loader, 0):
@@ -430,7 +437,8 @@ def test():
         input_data = torch.cat([data[0].float().to(device), predictions.float().to(device), im_prev.float().to(device)], dim=1)
 
         pred = model(input_data)
-        evaluation.evaluate(pred[0].numpy(),data[1][0].numpy())
+
+        evaluation.evaluate(pred[0].cpu().detach().numpy(),data[1][0].numpy())
 
         if (data[2] > 0) & ((data[3] - ind_prev) == 1.):
             predictions = pred.detach()

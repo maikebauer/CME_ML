@@ -1,7 +1,17 @@
-import numpy as np 
-import matplotlib.pyplot as plt
 import torch
+from torch import nn,optim
+import torch.nn.functional as F
+import glob
+from torch.utils.data import Dataset
+from PIL import Image
+import cv2
+from pycocotools import coco
+import matplotlib.pyplot as plt 
+import numpy as np
+import time 
+from torchvision.transforms import v2
 import sys
+import model
 
 def Kappa_cohen(predictions,groundtruth):
     # True Positive (TP): we predict a label of 1 (positive), and the true label is 1.
@@ -38,6 +48,13 @@ def precision_recall(predictions,groundtruth):
     FN = np.sum(np.logical_and(predictions == 0, groundtruth ==  1))
     precision = TP/ (TP+FP+0.000005)
     recall    = TP/ (TP+FN+0.000005)
+
+    if recall == 0:
+        recall = np.nan
+
+    if precision == 0:
+        precision = np.nan
+
     return precision,recall,TP,FP,TN,FN
 
 def IoU(predictions,groundtruth):
@@ -69,21 +86,21 @@ def Accuracy(predictions,groundtruth):
     # False Negative (FN): we predict a label of 0 (negative), but the true label is 1.
     FN   = np.sum(np.logical_and(predictions == 0, groundtruth ==  1))
 
-    return  (TP+TN)/groundtruth.shape[0]
+    return  (TP+TN)/(TP+TN+FP+FN+0.0000005)
 
 
 
-def evaluate(pred,gt):
+def evaluate(pred,gt,img):
 
 
-    thresholds = [0.5,0.55,0.60,0,65,0.7,0.75,0.8,0.85,0.90,0.95]
+    # thresholds = [0,0.5,0.55,0.60,65,0.7,0.75,0.8,0.85,0.90,0.95]
+    thresholds = [.1,0.15,0.2,0.25,0.3]
     ## check if there is a second CME
 
     metrics = []
 
     for p, res in enumerate(pred):
-        for t in thresholds:
-
+        for num, t in enumerate(thresholds):
             #compute binary mask for the CME, this is where you can add more processing (removing things behind front...)
             mask = np.zeros(res.shape)
 
@@ -94,6 +111,7 @@ def evaluate(pred,gt):
             precision,recall,TP,FP,TN,FN = precision_recall(mask,gt[p]) #precision recall at different thresholds for doing a precision recall curve plot
             iou = IoU(mask,gt[p]) ## main metric to look at, take the mean over dataset or over thresholds 
             acc = Accuracy(mask,gt[p]) #no need to explain
+            confusion_matrix = [[TP, FN], [FP, TN]]
 
             # print('KAPA: ', kapa)
             # print('Precision: ', precision)
@@ -101,14 +119,23 @@ def evaluate(pred,gt):
             # print('IOU: ', iou)
             # print('ACC: ', acc)
             # print('------------------------------')
-            
-            metrics.append([kapa,precision,recall,iou,acc])
 
+            # if np.any(gt[p]) > 0:
+            #     fig, ax = plt.subplots(4)
+            #     ax[0].imshow(img)
+            #     ax[1].imshow(gt[p])
+            #     ax[2].imshow(res)
+            #     ax[3].imshow(mask)
+            #     plt.show()
+
+            metrics.append([kapa,precision,recall,iou,acc])
 
     return metrics
 
 
+if __name__ == "__main__":
 
+    model.test()
 
 
     

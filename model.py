@@ -100,7 +100,7 @@ class FrondandDiff(Dataset):
 
     def get_img_and_annotation(self,idx):
 
-        width_par = 1024
+        width_par = 256
         height_par = width_par
 
         img_id   = self.img_ids[idx]
@@ -321,7 +321,7 @@ def train():
 
     pixel_looser= nn.BCELoss()
 
-    width = 1024
+    width = 256
     height = width
 
     num_iter = 200
@@ -427,13 +427,13 @@ def test():
                                                 pin_memory=False
                                             )
 
-    width = 1024
+    width = 256
     height = width
 
     ind_prev = 0
+    save_metrics = []
 
     for p, data in enumerate(data_loader, 0):
-
         if ((data[3] - ind_prev) == 1.) & (ind_prev != 0):
             pass
 
@@ -449,7 +449,7 @@ def test():
 
         pred = model(input_data)
 
-        metrics = evaluation.evaluate(pred[0].cpu().detach(),data[1][0].numpy())
+        metrics = evaluation.evaluate(pred[0].cpu().detach(),data[1][0].numpy(),data[0][0][0].cpu().detach())
 
         if (data[2] > 0):
 
@@ -461,6 +461,10 @@ def test():
             im_prev = torch.tensor(np.zeros(np.shape(data[0])))
 
         ind_prev = float(data[3].detach())
+        save_metrics.append(metrics)
+
+    print('Saving metrics...')
+    np.save('metrics.npy', save_metrics)
 
 if __name__ == "__main__":
 

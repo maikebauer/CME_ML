@@ -102,7 +102,7 @@ class FrondandDiff(Dataset):
 
     def get_img_and_annotation(self,idx):
 
-        width_par = 1024
+        width_par = 256
         height_par = width_par
 
         img_id   = self.img_ids[idx]
@@ -284,8 +284,7 @@ class CNN3D(nn.Module):
         x_01d = F.relu(self.decoder_convtr_01(x_0d))
         x_00d = self.decoder_convtr_00(x_01d)
 
-        return x_00d
-        # return self.sigmoid(x_00d)
+        return self.sigmoid(x_00d)
     
 
 def train():

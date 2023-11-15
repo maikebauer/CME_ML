@@ -29,6 +29,9 @@ class FrondandDiff(Dataset):
         event_list = []
         temp_list = []
 
+        # temp_list_zero = []
+        # temp_list_one = []
+
         a_id_prev = 0
 
         for a in range(0, len(self.img_ids)):
@@ -44,7 +47,6 @@ class FrondandDiff(Dataset):
                     temp_list.append(a)
 
                 elif (self.img_ids[a] - a_id_prev) > 1:
-
 
                     if len(temp_list) > 0:
                         event_list.append(temp_list)
@@ -112,7 +114,7 @@ class FrondandDiff(Dataset):
         im = np.asarray(Image.open("/Volumes/SSD/differences/"+img_file_name).convert("L"))/255.0
 
         if width_par != 1024:
-            im = cv2.resize(im  , (width_par , height_par), interpolation = cv2.INTER_CUBIC)
+            im = cv2.resize(im  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
 
         GT = np.zeros((2,1024,1024))
         annotations = self.coco_obj.getAnnIds(imgIds=img_id)
@@ -121,8 +123,7 @@ class FrondandDiff(Dataset):
             for a in annotations:
                 ann = self.coco_obj.loadAnns(a)
                 GT[int(ann[0]["attributes"]["id"]),:,:]=coco.maskUtils.decode(coco.maskUtils.frPyObjects([ann[0]['segmentation']], 1024, 1024))[:,:,0]
-
-
+        
         if width_par != 1024:
             a = cv2.resize(GT[0,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
             b = cv2.resize(GT[1,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
@@ -148,7 +149,7 @@ class FrondandDiff(Dataset):
 
         # make sure to apply same tranform to both
 
-        return torch.tensor(im).unsqueeze(0), torch.tensor(GT), len(annotations), img_id
+        return torch.tensor(im).unsqueeze(0), torch.tensor(GT)
          
 
 
@@ -283,8 +284,8 @@ class CNN3D(nn.Module):
         x_01d = F.relu(self.decoder_convtr_01(x_0d))
         x_00d = self.decoder_convtr_00(x_01d)
 
-        # return x_00d
-        return self.sigmoid(x_00d)
+        return x_00d
+        # return self.sigmoid(x_00d)
     
 
 def train():
@@ -297,7 +298,7 @@ def train():
     elif(torch.cuda.is_available()):
         device = torch.device("cuda")
 
-    model = CNN3D(4,2).to(device)
+    model = CNN3D(1,2).to(device)
 
     # composed = v2.Compose([v2.RandomHorizontalFlip(p=0.5), v2.RandomRotation((0, 360)), v2.RandomVerticalFlip(p=0.5)])
     dataset = FrondandDiff()
@@ -306,8 +307,8 @@ def train():
 
     dataset_sub = torch.utils.data.Subset(dataset, indices)
 
-    batch_size = 1
-    num_workers = 1
+    batch_size = 4
+    num_workers = 2
 
     data_loader = torch.utils.data.DataLoader(
                                                 dataset_sub,
@@ -321,57 +322,22 @@ def train():
 
     pixel_looser= nn.BCELoss()
 
-    width = 1024
-    height = width
-
     num_iter = 200
 
     for epoch in range(0, num_iter):
-        ind_prev = 0
-
         for p, data in enumerate(data_loader, 0):
             
             start = time.time()
             g_optimizer.zero_grad()
 
-            #data[3] = img_index
-            #data[2] = number of annotations
-
-            if ((data[3] - ind_prev) == 1.) & (ind_prev != 0):
-                pass
-
-            elif ind_prev == 0:
-                predictions = torch.tensor(np.zeros((1*batch_size, 2, width, height)))
-                im_prev = torch.tensor(np.zeros((1*batch_size, 1, width, height)))    
-
-            else:
-                predictions = torch.tensor(np.zeros(np.shape(pred)))
-                im_prev = torch.tensor(np.zeros(np.shape(data[0])))  
-
-            input_data = torch.cat([data[0].float().to(device), predictions.float().to(device), im_prev.float().to(device)], dim=1)
+            input_data = data[0].float().to(device)
             pred = model(input_data)
 
             loss = pixel_looser(pred, data[1].float().to(device))
             loss.backward()
             g_optimizer.step()
-            ind_prev = float(data[3].detach())
             
             #print(loss,time.time()-start)
-
-            # fig,ax = plt.subplots(3,3)
-            # ax[0][0].imshow(data[0][0][0].detach().cpu().numpy()) #image
-            # ax[0][1].imshow(data[1][0][0].detach().cpu().numpy()) #mask0
-            # ax[0][2].imshow(data[1][0][1].detach().cpu().numpy()) #mask1
-            # ax[1][0].imshow(data[0][0][0].detach().cpu().numpy()) 
-            # ax[1][1].imshow(pred[0][0].detach().cpu().numpy()) #mask0
-            # ax[1][2].imshow(pred[0][1].detach().cpu().numpy()) #mask1
-            # ax[2][0].imshow(data[0][0][0].detach().cpu().numpy()) 
-            # ax[2][1].imshow(im_prev[0][0]) #mask0
-            # ax[2][2].imshow(predictions[0][0]) #mask1
-
-            # plt.savefig('test_'+str(epoch)+'_'+str(p)+'.png')
-            # plt.show()
-            # plt.close()
 
             fig,ax = plt.subplots(2,3)
             ax[0][0].imshow(data[0][0][0].detach().cpu().numpy()) #image
@@ -384,16 +350,7 @@ def train():
             plt.savefig('test_'+str(epoch)+'.png')
             plt.close()
 
-            if (data[2] > 0):
-
-                predictions = pred.detach().cpu()
-                im_prev = data[0].detach()
-
-            else:
-                predictions = torch.tensor(np.zeros(np.shape(pred)))
-                im_prev = torch.tensor(np.zeros(np.shape(data[0])))  
-
-        torch.save(model.state_dict(), 'model.pth')
+        torch.save(model.state_dict(), 'model_test.pth')
 
 
 def test():
@@ -406,19 +363,18 @@ def test():
     elif(torch.cuda.is_available()):
         device = torch.device("cuda")
 
-    model = CNN3D(4,2).to(device)
-    model.load_state_dict(torch.load('model.pth', map_location=device))
+    model = CNN3D(1,2).to(device)
+    model.load_state_dict(torch.load('model_test.pth', map_location=device))
 
     # composed = v2.Compose([v2.RandomHorizontalFlip(p=0.5), v2.RandomRotation((0, 360)), v2.RandomVerticalFlip(p=0.5)])
     dataset = FrondandDiff()
             
     indices = dataset.test_data_idx
-
     dataset_sub = torch.utils.data.Subset(dataset, indices)
 
     batch_size = 1
     num_workers = 1
-    
+
     data_loader = torch.utils.data.DataLoader(
                                                 dataset_sub,
                                                 batch_size=batch_size,
@@ -427,40 +383,13 @@ def test():
                                                 pin_memory=False
                                             )
 
-    width = 1024
-    height = width
-
-    ind_prev = 0
-
     for p, data in enumerate(data_loader, 0):
-
-        if ((data[3] - ind_prev) == 1.) & (ind_prev != 0):
-            pass
-
-        elif ind_prev == 0:
-            predictions = torch.tensor(np.zeros((1*batch_size, 2, width, height)))
-            im_prev = torch.tensor(np.zeros((1*batch_size, 1, width, height)))    
-
-        else:
-            predictions = torch.tensor(np.zeros(np.shape(pred)))
-            im_prev = torch.tensor(np.zeros(np.shape(data[0])))  
         
-        input_data = torch.cat([data[0].float().to(device), predictions.float().to(device), im_prev.float().to(device)], dim=1)
+        input_data = data[0].float().to(device)
 
         pred = model(input_data)
-
+        
         metrics = evaluation.evaluate(pred[0].cpu().detach(),data[1][0].numpy())
-
-        if (data[2] > 0):
-
-            predictions = pred.detach().cpu()
-            im_prev = data[0].detach()
-
-        else:
-            predictions = torch.tensor(np.zeros(np.shape(pred)))
-            im_prev = torch.tensor(np.zeros(np.shape(data[0])))
-
-        ind_prev = float(data[3].detach())
 
 if __name__ == "__main__":
 

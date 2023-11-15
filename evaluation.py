@@ -1,6 +1,7 @@
 import numpy as np 
-
-
+import matplotlib.pyplot as plt
+import torch
+import sys
 
 def Kappa_cohen(predictions,groundtruth):
     # True Positive (TP): we predict a label of 1 (positive), and the true label is 1.
@@ -58,7 +59,7 @@ def IoU(predictions,groundtruth):
 def Accuracy(predictions,groundtruth):
     # True Positive (TP): we predict a label of 1 (positive), and the true label is 1.
     TP = np.sum(np.logical_and(predictions == 1, groundtruth == 1))
-     
+
     # True Negative (TN): we predict a label of 0 (negative), and the true label is 0.
     TN = np.sum(np.logical_and(predictions == 0, groundtruth == 0))
      
@@ -77,20 +78,33 @@ def evaluate(pred,gt):
 
     thresholds = [0.5,0.55,0.60,0,65,0.7,0.75,0.8,0.85,0.90,0.95]
     ## check if there is a second CME
-    if(gt[1,:,:].sum()>1):
-        print("Code the multiple CME bit here, same as single one but twice")
-    else:#only one CME
-        metrics = []
+
+    metrics = []
+
+    for p, res in enumerate(pred):
         for t in thresholds:
+
             #compute binary mask for the CME, this is where you can add more processing (removing things behind front...)
-            mask = np.zeros(pred[0].shape)
-            mask[pred[0]>t] = 1.0
+            mask = np.zeros(res.shape)
+
+            mask[res>t] = 1.0
             #computing metrics
-            kapa = Kappa_cohen(mask,gt[0]) ## kinda accuracy but for masks with a lot of background and small mask areas
-            precision,recall,TP,FP,TN,FN = precision_recall(mask,gt[0]) #precision recall at different thresholds for doing a precision recall curve plot
-            iou = IoU(mask,gt[0]) ## main metric to look at, take the mean over dataset or over thresholds 
-            acc = Accuracy(mask,gt[0]) #no need to explain
+
+            kapa = Kappa_cohen(mask,gt[p]) ## kinda accuracy but for masks with a lot of background and small mask areas
+            precision,recall,TP,FP,TN,FN = precision_recall(mask,gt[p]) #precision recall at different thresholds for doing a precision recall curve plot
+            iou = IoU(mask,gt[p]) ## main metric to look at, take the mean over dataset or over thresholds 
+            acc = Accuracy(mask,gt[p]) #no need to explain
+
+            # print('KAPA: ', kapa)
+            # print('Precision: ', precision)
+            # print('Recall: ', recall)
+            # print('IOU: ', iou)
+            # print('ACC: ', acc)
+            # print('------------------------------')
+            
             metrics.append([kapa,precision,recall,iou,acc])
+
+
     return metrics
 
 

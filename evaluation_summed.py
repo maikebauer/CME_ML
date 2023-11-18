@@ -11,8 +11,7 @@ import numpy as np
 import time 
 from torchvision.transforms import v2
 import sys
-import model
-import model_test
+import model_summed
 
 def Kappa_cohen(predictions,groundtruth):
     # True Positive (TP): we predict a label of 1 (positive), and the true label is 1.
@@ -95,8 +94,7 @@ def Accuracy(predictions,groundtruth):
 
 def evaluate(pred,gt,img):
 
-    print(np.shape(pred))
-    print(np.shape(gt))
+
     #thresholds = np.linspace(0,1,11)
     thresholds = [1e-5, 0.0001, 0.0005, 0.001, 0.005, 0.01]
     ## check if there is a second CME
@@ -133,7 +131,6 @@ def evaluate(pred,gt,img):
 
 if __name__ == "__main__":
 
-    model_test.test()
-    # model.test()
+    model_summed.test()
 
     

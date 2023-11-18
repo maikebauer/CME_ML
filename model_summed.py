@@ -45,7 +45,6 @@ class FrondandDiff(Dataset):
 
                 elif (self.img_ids[a] - a_id_prev) > 1:
 
-
                     if len(temp_list) > 0:
                         event_list.append(temp_list)
 
@@ -100,19 +99,24 @@ class FrondandDiff(Dataset):
 
     def get_img_and_annotation(self,idx):
 
-        width_par = 1024
+        width_par = 256
         height_par = width_par
 
         img_id   = self.img_ids[idx]
         img_info = self.coco_obj.loadImgs([img_id])[0]
         img_file_name = img_info["file_name"]
-        
+
+        if torch.cuda.is_available():
+            path = "/gpfs/data/fs72241/maibauer/differences/"
+
+        else:
+            path = "/Volumes/SSD/differences/"
 
         # Use URL to load image.
-        im = np.asarray(Image.open("/Volumes/SSD/differences/"+img_file_name).convert("L"))/255.0
+        im = np.asarray(Image.open(path+img_file_name).convert("L"))/255.0
 
         if width_par != 1024:
-            im = cv2.resize(im  , (width_par , height_par), interpolation = cv2.INTER_CUBIC)
+            im = cv2.resize(im  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
 
         GT = np.zeros((2,1024,1024))
         annotations = self.coco_obj.getAnnIds(imgIds=img_id)
@@ -121,8 +125,7 @@ class FrondandDiff(Dataset):
             for a in annotations:
                 ann = self.coco_obj.loadAnns(a)
                 GT[int(ann[0]["attributes"]["id"]),:,:]=coco.maskUtils.decode(coco.maskUtils.frPyObjects([ann[0]['segmentation']], 1024, 1024))[:,:,0]
-
-
+        
         if width_par != 1024:
             a = cv2.resize(GT[0,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
             b = cv2.resize(GT[1,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
@@ -132,6 +135,7 @@ class FrondandDiff(Dataset):
             b = GT[1,:,:]
 
         GT = np.concatenate([a[None,:,:],b[None,:,:]],0)
+        GT = np.sum(GT, axis=0)
 
         # seed = 1997
         # np.random.seed(seed) 
@@ -148,7 +152,7 @@ class FrondandDiff(Dataset):
 
         # make sure to apply same tranform to both
 
-        return torch.tensor(im).unsqueeze(0), torch.tensor(GT), len(annotations), img_id
+        return torch.tensor(im).unsqueeze(0), torch.tensor(GT).unsqueeze(0)
          
 
 
@@ -283,8 +287,10 @@ class CNN3D(nn.Module):
         x_01d = F.relu(self.decoder_convtr_01(x_0d))
         x_00d = self.decoder_convtr_00(x_01d)
 
-        # return x_00d
-        return self.sigmoid(x_00d)
+        return x_00d
+        #rn -> two classes (mask0, mask1) -> softmax to ensure probabilities add up to 1
+        #or -> one class (add mask0, mask1) -> sigmoid to ensure probabilities are between 0 and 1
+        #return self.sigmoid(x_00d)
     
 
 def train():
@@ -297,7 +303,7 @@ def train():
     elif(torch.cuda.is_available()):
         device = torch.device("cuda")
 
-    model = CNN3D(4,2).to(device)
+    model = CNN3D(1,1).to(device)
 
     # composed = v2.Compose([v2.RandomHorizontalFlip(p=0.5), v2.RandomRotation((0, 360)), v2.RandomVerticalFlip(p=0.5)])
     dataset = FrondandDiff()
@@ -306,8 +312,8 @@ def train():
 
     dataset_sub = torch.utils.data.Subset(dataset, indices)
 
-    batch_size = 1
-    num_workers = 1
+    batch_size = 4
+    num_workers = 2
 
     data_loader = torch.utils.data.DataLoader(
                                                 dataset_sub,
@@ -317,85 +323,67 @@ def train():
                                                 pin_memory=False
                                             )
     
-    g_optimizer = optim.Adam(model.parameters(),1e-3)
-
-    pixel_looser= nn.BCELoss()
-
-    width = 1024
-    height = width
+    g_optimizer = optim.Adam(model.parameters(),1e-4)
 
     num_iter = 200
 
-    for epoch in range(0, num_iter):
-        ind_prev = 0
+    sig = nn.Sigmoid()
 
+    for epoch in range(0, num_iter):
         for p, data in enumerate(data_loader, 0):
             
             start = time.time()
             g_optimizer.zero_grad()
 
-            #data[3] = img_index
-            #data[2] = number of annotations
+            input_data = data[0].float().to(device)
+            mask_data = data[1].float().to(device)
 
-            if ((data[3] - ind_prev) == 1.) & (ind_prev != 0):
-                pass
-
-            elif ind_prev == 0:
-                predictions = torch.tensor(np.zeros((1*batch_size, 2, width, height)))
-                im_prev = torch.tensor(np.zeros((1*batch_size, 1, width, height)))    
-
-            else:
-                predictions = torch.tensor(np.zeros(np.shape(pred)))
-                im_prev = torch.tensor(np.zeros(np.shape(data[0])))  
-
-            input_data = torch.cat([data[0].float().to(device), predictions.float().to(device), im_prev.float().to(device)], dim=1)
             pred = model(input_data)
 
-            loss = pixel_looser(pred, data[1].float().to(device))
+            weights = np.zeros(np.shape(mask_data)[0])
+            weights = torch.tensor(weights).to(device, dtype=torch.float32)
+
+            for i in range(np.shape(mask_data)[0]):
+                if mask_data[i,:,:].sum() == 0:
+                    weights[i] = 1
+                else:
+                    weights[i] = (mask_data[i,:,:]==0).sum()/mask_data[i,:,:].sum()
+            
+            weights = weights[:,None,None].unsqueeze(1)
+
+            pixel_looser = nn.BCEWithLogitsLoss(pos_weight=weights)
+
+            loss = pixel_looser(pred, mask_data)
+
             loss.backward()
             g_optimizer.step()
-            ind_prev = float(data[3].detach())
             
             #print(loss,time.time()-start)
 
-            # fig,ax = plt.subplots(3,3)
-            # ax[0][0].imshow(data[0][0][0].detach().cpu().numpy()) #image
-            # ax[0][1].imshow(data[1][0][0].detach().cpu().numpy()) #mask0
-            # ax[0][2].imshow(data[1][0][1].detach().cpu().numpy()) #mask1
-            # ax[1][0].imshow(data[0][0][0].detach().cpu().numpy()) 
-            # ax[1][1].imshow(pred[0][0].detach().cpu().numpy()) #mask0
-            # ax[1][2].imshow(pred[0][1].detach().cpu().numpy()) #mask1
-            # ax[2][0].imshow(data[0][0][0].detach().cpu().numpy()) 
-            # ax[2][1].imshow(im_prev[0][0]) #mask0
-            # ax[2][2].imshow(predictions[0][0]) #mask1
+            hspace = 0.1
+            wspace = 0.01
+            fig,ax = plt.subplots(np.shape(mask_data)[0], 3, figsize=(2*3+wspace*2, 2*np.shape(mask_data)[0]+hspace*(np.shape(mask_data)[0]-1)))
 
-            # plt.savefig('test_'+str(epoch)+'_'+str(p)+'.png')
-            # plt.show()
-            # plt.close()
+            for b in range(np.shape(mask_data)[0]):
+                ax[b][0].imshow(data[0][b][0].detach().cpu().numpy()) #image
+                ax[b][1].imshow(data[1][b][0].detach().cpu().numpy()) #mask
+                ax[b][2].imshow(sig(pred[b][0]).detach().cpu().numpy()) #pred
 
-            fig,ax = plt.subplots(2,3)
-            ax[0][0].imshow(data[0][0][0].detach().cpu().numpy()) #image
-            ax[0][1].imshow(data[1][0][0].detach().cpu().numpy()) #mask0
-            ax[0][2].imshow(data[1][0][1].detach().cpu().numpy()) #mask1
-            ax[1][0].imshow(data[0][0][0].detach().cpu().numpy()) 
-            ax[1][1].imshow(pred[0][0].detach().cpu().numpy()) #mask0
-            ax[1][2].imshow(pred[0][1].detach().cpu().numpy()) #mask1
+                ax[b][0].axis("off")
+                ax[b][1].axis("off")
+                ax[b][2].axis("off")
 
-            plt.savefig('test_'+str(epoch)+'.png')
+                ax[b][0].set_aspect("auto")
+                ax[b][1].set_aspect("auto")
+                ax[b][2].set_aspect("auto")
+
+            plt.subplots_adjust(wspace=wspace, hspace=hspace)
+            plt.savefig('test_'+str(epoch)+'.png', bbox_inches='tight')
             plt.close()
 
-            if (data[2] > 0):
+        torch.save(model.state_dict(), 'model_summed.pth')
 
-                predictions = pred.detach().cpu()
-                im_prev = data[0].detach()
-
-            else:
-                predictions = torch.tensor(np.zeros(np.shape(pred)))
-                im_prev = torch.tensor(np.zeros(np.shape(data[0])))  
-
-        torch.save(model.state_dict(), 'model.pth')
-
-
+@torch.no_grad()
 def test():
 
     device = torch.device("cpu")
@@ -406,20 +394,19 @@ def test():
     elif(torch.cuda.is_available()):
         device = torch.device("cuda")
 
-    model = CNN3D(4,2).to(device)
-    model.load_state_dict(torch.load('model.pth', map_location=device))
+    model = CNN3D(1,1).to(device)
+    model.load_state_dict(torch.load('model_summed.pth', map_location=device))
     model.eval()
-    
+
     # composed = v2.Compose([v2.RandomHorizontalFlip(p=0.5), v2.RandomRotation((0, 360)), v2.RandomVerticalFlip(p=0.5)])
     dataset = FrondandDiff()
             
     indices = dataset.test_data_idx
-
     dataset_sub = torch.utils.data.Subset(dataset, indices)
 
     batch_size = 1
     num_workers = 1
-    
+
     data_loader = torch.utils.data.DataLoader(
                                                 dataset_sub,
                                                 batch_size=batch_size,
@@ -427,47 +414,20 @@ def test():
                                                 num_workers=num_workers,
                                                 pin_memory=False
                                             )
-
-    width = 1024
-    height = width
-
-    ind_prev = 0
     save_metrics = []
 
     for p, data in enumerate(data_loader, 0):
-        if ((data[3] - ind_prev) == 1.) & (ind_prev != 0):
-            pass
-
-        elif ind_prev == 0:
-            predictions = torch.tensor(np.zeros((1*batch_size, 2, width, height)))
-            im_prev = torch.tensor(np.zeros((1*batch_size, 1, width, height)))    
-
-        else:
-            predictions = torch.tensor(np.zeros(np.shape(pred)))
-            im_prev = torch.tensor(np.zeros(np.shape(data[0])))  
         
-        input_data = torch.cat([data[0].float().to(device), predictions.float().to(device), im_prev.float().to(device)], dim=1)
+        input_data = data[0].float().to(device)
 
         pred = model(input_data)
-
         metrics = evaluation.evaluate(pred[0].cpu().detach(),data[1][0].numpy(),data[0][0][0].cpu().detach())
 
-        if (data[2] > 0):
-
-            predictions = pred.detach().cpu()
-            im_prev = data[0].detach()
-
-        else:
-            predictions = torch.tensor(np.zeros(np.shape(pred)))
-            im_prev = torch.tensor(np.zeros(np.shape(data[0])))
-
-        ind_prev = float(data[3].detach())
         save_metrics.append(metrics)
 
     print('Saving metrics...')
-    np.save('metrics.npy', save_metrics)
+    np.save('metrics_summed.npy', save_metrics)
 
 if __name__ == "__main__":
-    print('.........')
-    # train()
+    train()
     # test()

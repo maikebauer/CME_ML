@@ -11,7 +11,8 @@ import numpy as np
 import time 
 from torchvision.transforms import v2
 import sys
-import evaluation
+import evaluation_summed_aug
+import os
 
 class FrondandDiff(Dataset):
     def __init__(self, transform=None):
@@ -33,7 +34,6 @@ class FrondandDiff(Dataset):
 
         for a in range(0, len(self.img_ids)):
             anns = self.coco_obj.getAnnIds(imgIds=[self.img_ids[a]])
-            
 
             if(len(anns)>0):
 
@@ -44,7 +44,6 @@ class FrondandDiff(Dataset):
                     temp_list.append(a)
 
                 elif (self.img_ids[a] - a_id_prev) > 1:
-
 
                     if len(temp_list) > 0:
                         event_list.append(temp_list)
@@ -64,6 +63,7 @@ class FrondandDiff(Dataset):
         self.not_annotated = self.not_annotated[np.random.choice(len(self.not_annotated), len(self.annotated), replace=False)]
 
         self.annotated = list(self.annotated) + list(self.not_annotated)
+
         self.annotated = sorted(self.annotated)
 
         len_train_noevents = int(np.floor(len(self.not_annotated)*0.8))
@@ -106,13 +106,19 @@ class FrondandDiff(Dataset):
         img_id   = self.img_ids[idx]
         img_info = self.coco_obj.loadImgs([img_id])[0]
         img_file_name = img_info["file_name"]
-        
+
+        if torch.cuda.is_available():
+            path = "/gpfs/data/fs72241/maibauer/differences/"
+
+        else:
+            path = "/Volumes/SSD/differences/"
 
         # Use URL to load image.
-        im = np.asarray(Image.open("/Volumes/SSD/differences/"+img_file_name).convert("L"))/255.0
+
+        im = np.asarray(Image.open(path+img_file_name).convert("L"))/255.0
 
         if width_par != 1024:
-            im = cv2.resize(im  , (width_par , height_par), interpolation = cv2.INTER_CUBIC)
+            im = cv2.resize(im  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
 
         GT = np.zeros((2,1024,1024))
         annotations = self.coco_obj.getAnnIds(imgIds=img_id)
@@ -121,8 +127,7 @@ class FrondandDiff(Dataset):
             for a in annotations:
                 ann = self.coco_obj.loadAnns(a)
                 GT[int(ann[0]["attributes"]["id"]),:,:]=coco.maskUtils.decode(coco.maskUtils.frPyObjects([ann[0]['segmentation']], 1024, 1024))[:,:,0]
-
-
+        
         if width_par != 1024:
             a = cv2.resize(GT[0,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
             b = cv2.resize(GT[1,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
@@ -131,26 +136,27 @@ class FrondandDiff(Dataset):
             a = GT[0,:,:]
             b = GT[1,:,:]
 
-        GT = np.concatenate([a[None,:,:],b[None,:,:]],0)
+        cme_pix = np.logical_or(a == 1, b ==  1)
+        bg_pix = np.logical_and(a == 0, b ==  0)
 
-        # seed = 1997
-        # np.random.seed(seed) 
-        # torch.manual_seed(seed)
+        GT = np.concatenate([cme_pix[None, :, :],bg_pix[None, :, :]],0) 
 
-        # if self.transform:
-        #     im = self.transform(im)
+        seed = 1997
+        np.random.seed(seed) 
+        torch.manual_seed(seed)
 
-        # np.random.seed(seed) 
-        # torch.manual_seed(seed)
+        if self.transform:
+            im = self.transform(im)
 
-        # if self.transform:
-        #     GT = self.transform(GT)
+        np.random.seed(seed) 
+        torch.manual_seed(seed)
+
+        if self.transform:
+            GT = self.transform(GT)
 
         # make sure to apply same tranform to both
 
-        return torch.tensor(im).unsqueeze(0), torch.tensor(GT), len(annotations), img_id
-         
-
+        return torch.tensor(im).unsqueeze(0), torch.tensor(GT)
 
     def __len__(self):
         return len(self.annotated)
@@ -169,43 +175,43 @@ class CNN3D(nn.Module):
 
         # Encoder layers
 
-        self.encoder_conv_00 = nn.Sequential(*[nn.Conv2d(in_channels=self.input_channels,out_channels=64,kernel_size=3,padding=1),nn.BatchNorm2d(64)])
-        self.encoder_conv_01 = nn.Sequential(*[nn.Conv2d(in_channels=64,out_channels=64,kernel_size=3,padding=1),nn.BatchNorm2d(64)])
+        self.encoder_conv_00 = nn.Sequential(*[nn.Conv2d(in_channels=self.input_channels,out_channels=64,kernel_size=3,padding=1)])
+        self.encoder_conv_01 = nn.Sequential(*[nn.Conv2d(in_channels=64,out_channels=64,kernel_size=3,padding=1)])
 
-        self.encoder_conv_10 = nn.Sequential(*[nn.Conv2d(in_channels=64,out_channels=128,kernel_size=3,padding=1),nn.BatchNorm2d(128)])
-        self.encoder_conv_11 = nn.Sequential(*[nn.Conv2d(in_channels=128,out_channels=128,kernel_size=3,padding=1),nn.BatchNorm2d(128)])
+        self.encoder_conv_10 = nn.Sequential(*[nn.Conv2d(in_channels=64,out_channels=128,kernel_size=3,padding=1)])
+        self.encoder_conv_11 = nn.Sequential(*[nn.Conv2d(in_channels=128,out_channels=128,kernel_size=3,padding=1)])
 
-        self.encoder_conv_20 = nn.Sequential(*[nn.Conv2d(in_channels=128,out_channels=256,kernel_size=3,padding=1),nn.BatchNorm2d(256)])
-        self.encoder_conv_21 = nn.Sequential(*[nn.Conv2d(in_channels=256,out_channels=256,kernel_size=3,padding=1),nn.BatchNorm2d(256)])
-        self.encoder_conv_22 = nn.Sequential(*[nn.Conv2d(in_channels=256,out_channels=256,kernel_size=3,padding=1),nn.BatchNorm2d(256)])
+        self.encoder_conv_20 = nn.Sequential(*[nn.Conv2d(in_channels=128,out_channels=256,kernel_size=3,padding=1)])
+        self.encoder_conv_21 = nn.Sequential(*[nn.Conv2d(in_channels=256,out_channels=256,kernel_size=3,padding=1)])
+        self.encoder_conv_22 = nn.Sequential(*[nn.Conv2d(in_channels=256,out_channels=256,kernel_size=3,padding=1)])
 
-        self.encoder_conv_30 = nn.Sequential(*[nn.Conv2d(in_channels=256,out_channels=512,kernel_size=3,padding=1),nn.BatchNorm2d(512)])
-        self.encoder_conv_31 = nn.Sequential(*[nn.Conv2d(in_channels=512,out_channels=512,kernel_size=3,padding=1),nn.BatchNorm2d(512)])
-        self.encoder_conv_32 = nn.Sequential(*[nn.Conv2d(in_channels=512,out_channels=512,kernel_size=3,padding=1),nn.BatchNorm2d(512)])
+        self.encoder_conv_30 = nn.Sequential(*[nn.Conv2d(in_channels=256,out_channels=512,kernel_size=3,padding=1)])
+        self.encoder_conv_31 = nn.Sequential(*[nn.Conv2d(in_channels=512,out_channels=512,kernel_size=3,padding=1)])
+        self.encoder_conv_32 = nn.Sequential(*[nn.Conv2d(in_channels=512,out_channels=512,kernel_size=3,padding=1)])
 
-        self.encoder_conv_40 = nn.Sequential(*[nn.Conv2d(in_channels=512,out_channels=512,kernel_size=3,padding=1),nn.BatchNorm2d(512)])
-        self.encoder_conv_41 = nn.Sequential(*[nn.Conv2d(in_channels=512,out_channels=512,kernel_size=3,padding=1),nn.BatchNorm2d(512)])
-        self.encoder_conv_42 = nn.Sequential(*[nn.Conv2d(in_channels=512,out_channels=512,kernel_size=3,padding=1),nn.BatchNorm2d(512)])
+        self.encoder_conv_40 = nn.Sequential(*[nn.Conv2d(in_channels=512,out_channels=512,kernel_size=3,padding=1)])
+        self.encoder_conv_41 = nn.Sequential(*[nn.Conv2d(in_channels=512,out_channels=512,kernel_size=3,padding=1)])
+        self.encoder_conv_42 = nn.Sequential(*[nn.Conv2d(in_channels=512,out_channels=512,kernel_size=3,padding=1)])
 
 
         # Decoder layers
 
-        self.decoder_convtr_42 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=512,out_channels=512,kernel_size=3,padding=1),nn.BatchNorm2d(512)])
-        self.decoder_convtr_41 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=512,out_channels=512,kernel_size=3,padding=1),nn.BatchNorm2d(512)])
-        self.decoder_convtr_40 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=512,out_channels=512,kernel_size=3,padding=1),nn.BatchNorm2d(512)])
+        self.decoder_convtr_42 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=512,out_channels=512,kernel_size=3,padding=1)])
+        self.decoder_convtr_41 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=512,out_channels=512,kernel_size=3,padding=1)])
+        self.decoder_convtr_40 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=512,out_channels=512,kernel_size=3,padding=1)])
 
-        self.decoder_convtr_32 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=512,out_channels=512,kernel_size=3,padding=1),nn.BatchNorm2d(512)])
-        self.decoder_convtr_31 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=512,out_channels=512,kernel_size=3,padding=1),nn.BatchNorm2d(512)])
-        self.decoder_convtr_30 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=512,out_channels=256,kernel_size=3,padding=1),nn.BatchNorm2d(256)])
+        self.decoder_convtr_32 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=512,out_channels=512,kernel_size=3,padding=1)])
+        self.decoder_convtr_31 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=512,out_channels=512,kernel_size=3,padding=1)])
+        self.decoder_convtr_30 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=512,out_channels=256,kernel_size=3,padding=1)])
 
-        self.decoder_convtr_22 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=256,out_channels=256,kernel_size=3,padding=1),nn.BatchNorm2d(256)])
-        self.decoder_convtr_21 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=256,out_channels=256,kernel_size=3,padding=1),nn.BatchNorm2d(256)])
-        self.decoder_convtr_20 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=256,out_channels=128,kernel_size=3,padding=1),nn.BatchNorm2d(128)])
+        self.decoder_convtr_22 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=256,out_channels=256,kernel_size=3,padding=1)])
+        self.decoder_convtr_21 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=256,out_channels=256,kernel_size=3,padding=1)])
+        self.decoder_convtr_20 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=256,out_channels=128,kernel_size=3,padding=1)])
 
-        self.decoder_convtr_11 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=128,out_channels=128,kernel_size=3,padding=1),nn.BatchNorm2d(128)])
-        self.decoder_convtr_10 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=128,out_channels=64,kernel_size=3,padding=1),nn.BatchNorm2d(64)])
+        self.decoder_convtr_11 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=128,out_channels=128,kernel_size=3,padding=1)])
+        self.decoder_convtr_10 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=128,out_channels=64,kernel_size=3,padding=1)])
 
-        self.decoder_convtr_01 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=64,out_channels=64,kernel_size=3,padding=1),nn.BatchNorm2d(64)])
+        self.decoder_convtr_01 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=64,out_channels=64,kernel_size=3,padding=1)])
         self.decoder_convtr_00 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=64,out_channels=self.output_channels,kernel_size=3,padding=1)])
 
 
@@ -283,8 +289,7 @@ class CNN3D(nn.Module):
         x_01d = F.relu(self.decoder_convtr_01(x_0d))
         x_00d = self.decoder_convtr_00(x_01d)
 
-        # return x_00d
-        return self.sigmoid(x_00d)
+        return x_00d
     
 
 def train():
@@ -297,106 +302,104 @@ def train():
     elif(torch.cuda.is_available()):
         device = torch.device("cuda")
 
-    model = CNN3D(4,2).to(device)
+    model = CNN3D(1,2).to(device)
 
-    # composed = v2.Compose([v2.RandomHorizontalFlip(p=0.5), v2.RandomRotation((0, 360)), v2.RandomVerticalFlip(p=0.5)])
-    dataset = FrondandDiff()
+    composed = v2.Compose([v2.RandomHorizontalFlip(p=0.5), v2.RandomRotation((0, 360)), v2.RandomVerticalFlip(p=0.5)])
+
+    dataset = FrondandDiff(transform=composed)
             
     indices = dataset.train_data_idx
 
     dataset_sub = torch.utils.data.Subset(dataset, indices)
 
-    batch_size = 1
-    num_workers = 1
-
+    batch_size = 4
+    num_workers = 2
     data_loader = torch.utils.data.DataLoader(
                                                 dataset_sub,
                                                 batch_size=batch_size,
-                                                shuffle=False,
+                                                shuffle=True,
                                                 num_workers=num_workers,
                                                 pin_memory=False
                                             )
     
-    g_optimizer = optim.Adam(model.parameters(),1e-3)
-
-    pixel_looser= nn.BCELoss()
-
-    width = 1024
-    height = width
+    g_optimizer = optim.Adam(model.parameters(),1e-4)
 
     num_iter = 200
 
-    for epoch in range(0, num_iter):
-        ind_prev = 0
+    smax = nn.Softmax2d()
 
+    weights = np.zeros(2)
+
+    weights_temp = []
+
+    for data in data_loader:
+        for b in range(np.shape(data[1])[0]):
+            cme_data = data[1][b][0].float().to(device).cpu().numpy()
+            bg_data = data[1][b][1].float().to(device).cpu().numpy()
+            cme_count = np.sum(cme_data)
+            bg_count = np.sum(bg_data)
+
+            if cme_count > 0:
+                weights_temp.append(bg_count/cme_count)
+            else:
+                weights_temp.append(np.nan)
+    
+    weights[0] = np.nanmean(weights_temp)
+    weights[1] = 1
+    weights = torch.tensor(weights).to(device, dtype=torch.float32)
+
+    pixel_looser = nn.CrossEntropyLoss(weight=weights)
+
+    for epoch in range(0, num_iter):
         for p, data in enumerate(data_loader, 0):
             
             start = time.time()
             g_optimizer.zero_grad()
 
-            #data[3] = img_index
-            #data[2] = number of annotations
-
-            if ((data[3] - ind_prev) == 1.) & (ind_prev != 0):
-                pass
-
-            elif ind_prev == 0:
-                predictions = torch.tensor(np.zeros((1*batch_size, 2, width, height)))
-                im_prev = torch.tensor(np.zeros((1*batch_size, 1, width, height)))    
-
-            else:
-                predictions = torch.tensor(np.zeros(np.shape(pred)))
-                im_prev = torch.tensor(np.zeros(np.shape(data[0])))  
-
-            input_data = torch.cat([data[0].float().to(device), predictions.float().to(device), im_prev.float().to(device)], dim=1)
+            input_data = data[0].float().to(device)
+            mask_data = data[1].float().to(device)
             pred = model(input_data)
+            loss = pixel_looser(pred, mask_data)
 
-            loss = pixel_looser(pred, data[1].float().to(device))
             loss.backward()
             g_optimizer.step()
-            ind_prev = float(data[3].detach())
             
-            #print(loss,time.time()-start)
+            # print(loss,time.time()-start)
 
-            # fig,ax = plt.subplots(3,3)
-            # ax[0][0].imshow(data[0][0][0].detach().cpu().numpy()) #image
-            # ax[0][1].imshow(data[1][0][0].detach().cpu().numpy()) #mask0
-            # ax[0][2].imshow(data[1][0][1].detach().cpu().numpy()) #mask1
-            # ax[1][0].imshow(data[0][0][0].detach().cpu().numpy()) 
-            # ax[1][1].imshow(pred[0][0].detach().cpu().numpy()) #mask0
-            # ax[1][2].imshow(pred[0][1].detach().cpu().numpy()) #mask1
-            # ax[2][0].imshow(data[0][0][0].detach().cpu().numpy()) 
-            # ax[2][1].imshow(im_prev[0][0]) #mask0
-            # ax[2][2].imshow(predictions[0][0]) #mask1
+            hspace = 0.01
+            wspace = 0.01
 
-            # plt.savefig('test_'+str(epoch)+'_'+str(p)+'.png')
-            # plt.show()
+            # fig,ax = plt.subplots(np.shape(mask_data)[0], 3, figsize=(2*3+wspace*2, 2*np.shape(mask_data)[0]+hspace*(np.shape(mask_data)[0]-1)))
+
+            # for b in range(np.shape(mask_data)[0]):
+            #     ax[b][0].imshow(data[0][b][0].detach().cpu().numpy()) #image
+            #     ax[b][1].imshow(data[1][b][0].detach().cpu().numpy()) #mask
+            #     ax[b][2].imshow(smax(pred)[b][0].detach().cpu().numpy()) #pred
+
+            #     ax[b][0].axis("off")
+            #     ax[b][1].axis("off")
+            #     ax[b][2].axis("off")
+
+            #     ax[b][0].set_aspect("auto")
+            #     ax[b][1].set_aspect("auto")
+            #     ax[b][2].set_aspect("auto")
+
+            # plt.subplots_adjust(wspace=wspace, hspace=hspace)
+            # plt.savefig('test_'+str(epoch)+'.png', bbox_inches='tight')
             # plt.close()
+        
+        model_name = "model_summed_aug_"+"epoch_{}".format(epoch)
 
-            fig,ax = plt.subplots(2,3)
-            ax[0][0].imshow(data[0][0][0].detach().cpu().numpy()) #image
-            ax[0][1].imshow(data[1][0][0].detach().cpu().numpy()) #mask0
-            ax[0][2].imshow(data[1][0][1].detach().cpu().numpy()) #mask1
-            ax[1][0].imshow(data[0][0][0].detach().cpu().numpy()) 
-            ax[1][1].imshow(pred[0][0].detach().cpu().numpy()) #mask0
-            ax[1][2].imshow(pred[0][1].detach().cpu().numpy()) #mask1
+        train_path = 'Model_Train/'
 
-            plt.savefig('test_'+str(epoch)+'.png')
-            plt.close()
+        if not os.path.exists(train_path): 
+            os.makedirs(train_path, exist_ok=True) 
 
-            if (data[2] > 0):
+        torch.save(model.state_dict(), train_path+model_name+'.pth')
 
-                predictions = pred.detach().cpu()
-                im_prev = data[0].detach()
-
-            else:
-                predictions = torch.tensor(np.zeros(np.shape(pred)))
-                im_prev = torch.tensor(np.zeros(np.shape(data[0])))  
-
-        torch.save(model.state_dict(), 'model.pth')
-
-
-def test():
+@torch.no_grad()
+def test(epoch):
+    start = time.time()
 
     device = torch.device("cpu")
 
@@ -406,68 +409,54 @@ def test():
     elif(torch.cuda.is_available()):
         device = torch.device("cuda")
 
-    model = CNN3D(4,2).to(device)
-    model.load_state_dict(torch.load('model.pth', map_location=device))
-    model.eval()
+    model = CNN3D(1,2).to(device)
+
+    train_path = 'Model_Train/'
+
+    epoch = int(epoch)
     
-    # composed = v2.Compose([v2.RandomHorizontalFlip(p=0.5), v2.RandomRotation((0, 360)), v2.RandomVerticalFlip(p=0.5)])
+    model_name = "model_summed_aug_"+"epoch_{}".format(epoch)
+
+    model.load_state_dict(torch.load(train_path+model_name + ".pth", map_location=device))
+    model.eval()
+
     dataset = FrondandDiff()
             
     indices = dataset.test_data_idx
-
     dataset_sub = torch.utils.data.Subset(dataset, indices)
 
-    batch_size = 1
-    num_workers = 1
-    
+    batch_size = 2
+    num_workers = 2
+
     data_loader = torch.utils.data.DataLoader(
                                                 dataset_sub,
                                                 batch_size=batch_size,
-                                                shuffle=False,
+                                                shuffle=True,
                                                 num_workers=num_workers,
                                                 pin_memory=False
                                             )
-
-    width = 1024
-    height = width
-
-    ind_prev = 0
     save_metrics = []
 
     for p, data in enumerate(data_loader, 0):
-        if ((data[3] - ind_prev) == 1.) & (ind_prev != 0):
-            pass
-
-        elif ind_prev == 0:
-            predictions = torch.tensor(np.zeros((1*batch_size, 2, width, height)))
-            im_prev = torch.tensor(np.zeros((1*batch_size, 1, width, height)))    
-
-        else:
-            predictions = torch.tensor(np.zeros(np.shape(pred)))
-            im_prev = torch.tensor(np.zeros(np.shape(data[0])))  
-        
-        input_data = torch.cat([data[0].float().to(device), predictions.float().to(device), im_prev.float().to(device)], dim=1)
+        input_data = data[0].float().to(device)
 
         pred = model(input_data)
 
-        metrics = evaluation.evaluate(pred[0].cpu().detach(),data[1][0].numpy(),data[0][0][0].cpu().detach())
+        metrics = evaluation_summed_aug.evaluate(pred.cpu().detach(),data[1].numpy(),data[0].cpu().detach(), model_name)
 
-        if (data[2] > 0):
-
-            predictions = pred.detach().cpu()
-            im_prev = data[0].detach()
-
-        else:
-            predictions = torch.tensor(np.zeros(np.shape(pred)))
-            im_prev = torch.tensor(np.zeros(np.shape(data[0])))
-
-        ind_prev = float(data[3].detach())
         save_metrics.append(metrics)
 
+    save_metrics = np.nanmean(save_metrics, axis=0)
+    
     print('Saving metrics...')
-    np.save('metrics.npy', save_metrics)
+
+    metrics_path = 'Model_Metrics/'
+
+    if not os.path.exists(metrics_path): 
+        os.makedirs(metrics_path, exist_ok=True) 
+
+    np.save(metrics_path+model_name+'.npy', save_metrics)
+    print(time.time()-start)
 
 if __name__ == "__main__":
-    print('.........')
-    # train()
-    # test()
+    train()

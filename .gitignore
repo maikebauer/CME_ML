@@ -46,6 +46,7 @@ Thumbs.db
 *.png
 *.pth
 *.npy
+output.txt
 
 # Folders to ignore #
 ###################
@@ -54,3 +55,7 @@ Test_V2/
 Model_Train/
 Model_Metrics/
 Model_Versions/
+Model_Train_Old/
+Model_Test/
+imgs/
+__pycache__/

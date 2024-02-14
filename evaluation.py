@@ -11,10 +11,11 @@ import numpy as np
 import time 
 from torchvision.transforms import v2
 import sys
-import model_summed_aug
+import model_torch
 from matplotlib.colors import ListedColormap
 from datetime import datetime
 import os
+import csv
 
 def Kappa_cohen(predictions,groundtruth):
     # True Positive (TP): we predict a label of 1 (positive), and the true label is 1.
@@ -109,9 +110,10 @@ def confusion_images(predictions,groundtruth):
 
     return  TP, TN, FP, FN
 
-def evaluate(pred,gt,img, model_name):
+def evaluate(pred, gt, img, model_name, folder_path):
 
     thresholds = np.round(np.linspace(0.5,0.95,10),2)
+    thresholds = np.append(thresholds, 0.99)
 
     metrics = []
     smax = nn.Softmax2d()
@@ -133,17 +135,9 @@ def evaluate(pred,gt,img, model_name):
             confusion_matrix = [[TP, FN], [FP, TN]]
             TP, TN, FP, FN = confusion_images(mask,gt[p][0])
 
-            if (np.sum(gt[p][0]) > 0) & (iou > 0.3):
+            if (np.sum(gt[p][0]) > 0) & (t >= 0.8) & (p == 0):
 
-                # print('threshold: ',t)
-                # print('precision: ',precision)
-                # print('recall: ',recall)
-                # print('iou: ',iou)
-
-                hspace = 0
-                wspace = 0.01
-
-                fig,ax = plt.subplots(1, figsize=(8,8))
+                fig,ax = plt.subplots(1, figsize=(5,5))
                 
                 input_data = img[p][0]
                 
@@ -151,9 +145,9 @@ def evaluate(pred,gt,img, model_name):
                 FP = np.where(FP == 0, np.nan, FP)
                 FN = np.where(FN == 0, np.nan, FN)
 
-                cmap_tp = ListedColormap(['#785EF0','red'])
-                cmap_fp = ListedColormap(['#DC267F','green'])
-                cmap_fn =ListedColormap(['#FE6100','black'])
+                cmap_tp = ListedColormap(['#785EF0','violet'])
+                cmap_fp = ListedColormap(['#DC267F','pink'])
+                cmap_fn = ListedColormap(['#FE6100','orange'])
 
                 al = 0.35
                 ax.imshow(input_data, cmap='gray', interpolation='none')
@@ -163,35 +157,15 @@ def evaluate(pred,gt,img, model_name):
                 
                 ax.axis("off")
                 plt.tight_layout()
-
-                timestr = datetime.now().strftime('%Y%m%d_%H%M%S')
                 
-                test_path = 'Model_Test/Images/'
+                im_path = 'Model_Metrics/'+folder_path+'/images/'
 
-                if not os.path.exists(test_path): 
-                    os.makedirs(test_path, exist_ok=True) 
+                if not os.path.exists(im_path): 
+                    os.makedirs(im_path, exist_ok=True) 
 
-                plt.savefig(test_path+model_name+'_t'+'{:.2f}'.format(t)+'_'+timestr+'.png', dpi=300, bbox_inches='tight', pad_inches=0)
+                plt.savefig(im_path+model_name+'_test_t'+'{:.2f}'.format(t)+'.png', dpi=100, bbox_inches='tight', pad_inches=0)
+                plt.close()
                 
-                #plt.show()                
-            #     fig, ax = plt.subplots(1,4, figsize=(8,2), frameon=False)
-            #     ax[0].imshow(img[p][0], cmap='gray')
-            #     ax[1].imshow(gt[p][0])
-            #     ax[2].imshow(res[0])
-            #     ax[3].imshow(mask)
-            #     ax[0].axis("off")
-            #     ax[1].axis("off")
-            #     ax[2].axis("off")
-            #     ax[3].axis("off")
-
-            #     ax[0].set_aspect("equal")
-            #     ax[1].set_aspect("equal")
-            #     ax[2].set_aspect("equal")
-            #     ax[3].set_aspect("equal")
-            #     #plt.subplots_adjust(wspace=wspace, hspace=hspace)
-            #     plt.tight_layout()
-
-            #     plt.show()
             metrics_batch.append([kapa,precision,recall,iou,acc])
         
         metrics.append(np.nanmean(metrics_batch, axis=0))
@@ -201,6 +175,7 @@ def evaluate(pred,gt,img, model_name):
 
 if __name__ == "__main__":
     epoch = sys.argv[1]
-    model_summed_aug.test(epoch=epoch)
+    folder_path = sys.argv[2]
+    model_torch.test(epoch=epoch, folder_path=folder_path)
 
     

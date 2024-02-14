@@ -11,18 +11,21 @@ import numpy as np
 import time 
 from torchvision.transforms import v2
 import sys
-import evaluation_summed_aug
+import evaluation
 import os
+import csv
+from backbones_unet.model.unet import Unet
+from datetime import datetime
 
 class FrondandDiff(Dataset):
     def __init__(self, transform=None):
 
         self.transform = transform
 
-        self.coco_obj = coco.COCO("instances_default.json")
+        self.coco_obj = coco.COCO("instances_clahe.json")
         
 
-        self.img_ids = self.coco_obj.getImgIds()[:3844]###until last image annotated
+        self.img_ids = self.coco_obj.getImgIds()[:3968]###until last image annotated
 
         self.annotated = []
         self.events = []
@@ -100,59 +103,84 @@ class FrondandDiff(Dataset):
 
     def get_img_and_annotation(self,idx):
 
-        width_par = 1024
-        height_par = width_par
-
         img_id   = self.img_ids[idx]
         img_info = self.coco_obj.loadImgs([img_id])[0]
-        img_file_name = img_info["file_name"]
+        img_file_name = img_info["file_name"].split('/')[-1]
 
         if torch.cuda.is_available():
-            path = "/gpfs/data/fs72241/maibauer/differences/"
+            
+            if os.path.isdir('/home/mbauer/Data/'):
+                path = "/home/mbauer/Data/differences_clahe/"
+                width_par = 128
+            
+            elif os.path.isdir('/gpfs/data/fs72241/maibauer/'):
+                path = "/gpfs/data/fs72241/maibauer/differences_clahe/"
+                width_par = 128
+
+            else:
+                raise FileNotFoundError('No folder with differences found. Please check path.')
+                sys.exit()
 
         else:
-            path = "/Volumes/SSD/differences/"
+            path = "/Volumes/SSD/differences_clahe/"
+            width_par = 128
+
+        height_par = width_par
 
         # Use URL to load image.
 
-        im = np.asarray(Image.open(path+img_file_name).convert("L"))/255.0
+        im = np.asarray(Image.open(path+img_file_name).convert("L"))
 
         if width_par != 1024:
             im = cv2.resize(im  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
 
-        GT = np.zeros((2,1024,1024))
+        GT = []
         annotations = self.coco_obj.getAnnIds(imgIds=img_id)
 
         if(len(annotations)>0):
             for a in annotations:
                 ann = self.coco_obj.loadAnns(a)
-                GT[int(ann[0]["attributes"]["id"]),:,:]=coco.maskUtils.decode(coco.maskUtils.frPyObjects([ann[0]['segmentation']], 1024, 1024))[:,:,0]
+                GT.append(coco.maskUtils.decode(coco.maskUtils.frPyObjects([ann[0]['segmentation']], 1024, 1024))[:,:,0])
+        
+        else:
+            GT.append(np.zeros((1024,1024)))
         
         if width_par != 1024:
-            a = cv2.resize(GT[0,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
-            b = cv2.resize(GT[1,:,:]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
+            for i in range(len(GT)):
+                GT[i] = cv2.resize(GT[i]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
+
+        GT = np.array(GT)
+
+        cme_pix = np.any(GT, axis=0)*255
+        bg_pix = np.all(GT==0, axis=0)*255
+
+        seed = np.random.randint(1000)
+        torch.manual_seed(seed)
+       
+        if self.transform:
+            im = im.astype(np.uint8)
+            im = self.transform(im)
+            im = np.asarray(im.convert("L"))/255.0
+        else:
+            im = im/255.0
+
+        torch.manual_seed(seed)
+
+        if self.transform:
+            cme_pix = cme_pix.astype(np.uint8)
+            cme_pix = self.transform(cme_pix)
+        
+            bg_pix = bg_pix.astype(np.uint8)
+            bg_pix = self.transform(bg_pix)
+
+            cme_pix = np.asarray(cme_pix.convert("L"))/255.0
+            bg_pix = np.asarray(bg_pix.convert("L"))/255.0
 
         else:
-            a = GT[0,:,:]
-            b = GT[1,:,:]
-
-        cme_pix = np.logical_or(a == 1, b ==  1)
-        bg_pix = np.logical_and(a == 0, b ==  0)
-
-        GT = np.concatenate([cme_pix[None, :, :],bg_pix[None, :, :]],0) 
-
-        seed = 1997
-        np.random.seed(seed) 
-        torch.manual_seed(seed)
-
-        if self.transform:
-            im = self.transform(im)
-
-        np.random.seed(seed) 
-        torch.manual_seed(seed)
-
-        if self.transform:
-            GT = self.transform(GT)
+            cme_pix = cme_pix/255.0
+            bg_pix = bg_pix/255.0
+        
+        GT = np.concatenate([cme_pix[None, :, :],bg_pix[None, :, :]],0)
 
         # make sure to apply same tranform to both
 
@@ -292,28 +320,46 @@ class CNN3D(nn.Module):
         return x_00d
     
 
-def train():
+def train(backbone):
 
     device = torch.device("cpu")
+
+    batch_size = 4
+    num_workers = 2
+
+    aug = True
 
     if(torch.backends.mps.is_available()):
         device = torch.device("mps")
 
     elif(torch.cuda.is_available()):
-        device = torch.device("cuda")
+        device = torch.device("cuda:1")
+        batch_size = 24
+        num_workers = 8
 
-    model = CNN3D(1,2).to(device)
+    if backbone == 'custom':
+        model = CNN3D(1,2).to(device)
 
-    composed = v2.Compose([v2.RandomHorizontalFlip(p=0.5), v2.RandomRotation((0, 360)), v2.RandomVerticalFlip(p=0.5)])
+    else:
+        model = Unet(
+            backbone=backbone, # backbone network name
+            in_channels=1,            # input channels (1 for gray-scale images, 3 for RGB, etc.)
+            num_classes=2,            # output channels (number of classes in your dataset)
+        ).to(device)    
+    
+    composed = v2.Compose([v2.ToPILImage(), v2.RandomHorizontalFlip(p=0.5), v2.RandomRotation((0, 360)), v2.RandomVerticalFlip(p=0.5)])
+    
+    if aug == True:
+        dataset = FrondandDiff(transform=composed)
 
-    dataset = FrondandDiff(transform=composed)
-            
+    else:
+        dataset = FrondandDiff()
+
     indices = dataset.train_data_idx
 
     dataset_sub = torch.utils.data.Subset(dataset, indices)
 
-    batch_size = 4
-    num_workers = 2
+
     data_loader = torch.utils.data.DataLoader(
                                                 dataset_sub,
                                                 batch_size=batch_size,
@@ -324,33 +370,45 @@ def train():
     
     g_optimizer = optim.Adam(model.parameters(),1e-4)
 
-    num_iter = 200
+    num_iter = 401
 
     smax = nn.Softmax2d()
 
     weights = np.zeros(2)
-
-    weights_temp = []
+    #class 0 is cme, class 1 is background
+    cme_count = 0
+    bg_count = 0
 
     for data in data_loader:
         for b in range(np.shape(data[1])[0]):
             cme_data = data[1][b][0].float().to(device).cpu().numpy()
             bg_data = data[1][b][1].float().to(device).cpu().numpy()
-            cme_count = np.sum(cme_data)
-            bg_count = np.sum(bg_data)
+            cme_count = cme_count + np.sum(cme_data)
+            bg_count = bg_count + np.sum(bg_data)
 
-            if cme_count > 0:
-                weights_temp.append(bg_count/cme_count)
-            else:
-                weights_temp.append(np.nan)
-    
-    weights[0] = np.nanmean(weights_temp)
-    weights[1] = 1
+    n_samples = cme_count + bg_count
+    n_classes = 2
+
+    weights[0] = n_samples/(n_classes*cme_count)
+    weights[1] = n_samples/(n_classes*bg_count)
+
     weights = torch.tensor(weights).to(device, dtype=torch.float32)
 
     pixel_looser = nn.CrossEntropyLoss(weight=weights)
 
+    optimizer_data = []
+    
+    now = datetime.now()
+    dt_string = now.strftime("%d%m%Y_%H%M%S")
+
+    train_path = 'Model_Train/run_'+dt_string+"_model_"+backbone+'/'
+
+    if not os.path.exists(train_path): 
+        os.makedirs(train_path, exist_ok=True) 
+
     for epoch in range(0, num_iter):
+        epoch_loss = 0
+
         for p, data in enumerate(data_loader, 0):
             
             start = time.time()
@@ -364,69 +422,100 @@ def train():
             loss.backward()
             g_optimizer.step()
             
+            epoch_loss += loss.item()
             # print(loss,time.time()-start)
 
-            hspace = 0.01
-            wspace = 0.01
+        epoch_loss = epoch_loss/(data_loader.__len__())
 
-            # fig,ax = plt.subplots(np.shape(mask_data)[0], 3, figsize=(2*3+wspace*2, 2*np.shape(mask_data)[0]+hspace*(np.shape(mask_data)[0]-1)))
+        optimizer_data.append([epoch, epoch_loss])
 
-            # for b in range(np.shape(mask_data)[0]):
-            #     ax[b][0].imshow(data[0][b][0].detach().cpu().numpy()) #image
-            #     ax[b][1].imshow(data[1][b][0].detach().cpu().numpy()) #mask
-            #     ax[b][2].imshow(smax(pred)[b][0].detach().cpu().numpy()) #pred
+        model_name = "model_epoch_{}".format(epoch)
 
-            #     ax[b][0].axis("off")
-            #     ax[b][1].axis("off")
-            #     ax[b][2].axis("off")
+        hspace = 0.01
+        wspace = 0.01
 
-            #     ax[b][0].set_aspect("auto")
-            #     ax[b][1].set_aspect("auto")
-            #     ax[b][2].set_aspect("auto")
+        if epoch % 5 == 0:
+            fig,ax = plt.subplots(np.shape(mask_data)[0], 4, figsize=(2*4+wspace*2, 2*np.shape(mask_data)[0]+hspace*(np.shape(mask_data)[0]-1)))
 
-            # plt.subplots_adjust(wspace=wspace, hspace=hspace)
-            # plt.savefig('test_'+str(epoch)+'.png', bbox_inches='tight')
-            # plt.close()
-        
-        model_name = "model_summed_aug_"+"epoch_{}".format(epoch)
+            for b in range(np.shape(mask_data)[0]):
+                ax[b][0].imshow(data[0][b][0].detach().cpu().numpy()) #image
+                ax[b][1].imshow(data[1][b][0].detach().cpu().numpy()) #mask
+                ax[b][2].imshow(smax(pred)[b][0].detach().cpu().numpy()) #pred
+                ax[b][3].plot(*zip(*optimizer_data)) #loss
 
-        train_path = 'Model_Train/'
+                ax[b][0].axis("off")
+                ax[b][1].axis("off")
+                ax[b][2].axis("off")
+                ax[b][3].axis("off")
 
-        if not os.path.exists(train_path): 
-            os.makedirs(train_path, exist_ok=True) 
+                ax[b][0].set_aspect("auto")
+                ax[b][1].set_aspect("auto")
+                ax[b][2].set_aspect("auto")
+                ax[b][3].set_aspect("auto")
 
-        torch.save(model.state_dict(), train_path+model_name+'.pth')
+                plt.subplots_adjust(wspace=wspace, hspace=hspace)
+
+                im_path = train_path+'images/'
+                
+                if not os.path.exists(im_path): 
+                    os.makedirs(im_path, exist_ok=True) 
+
+                fig.savefig(im_path+'output_'+model_name+'.png', bbox_inches='tight')
+                plt.close()
+
+        if epoch % 5 == 0:
+            torch.save(model.state_dict(), train_path+model_name+'.pth')
+            # torch.save(g_optimizer.state_dict(), train_path+model_name+'_optimizer.pth')
+
+    os.makedirs(os.path.dirname(train_path), exist_ok=True)
+
+    with open(train_path + "model_loss.csv", 'w') as csvfile:
+        filewriter = csv.writer(csvfile, delimiter=',')
+        filewriter.writerow(optimizer_data)
+
 
 @torch.no_grad()
-def test(epoch):
+def test(epoch, folder_path):
     start = time.time()
 
     device = torch.device("cpu")
+
+    batch_size = 4
+    num_workers = 2
 
     if(torch.backends.mps.is_available()):
         device = torch.device("mps")
 
     elif(torch.cuda.is_available()):
-        device = torch.device("cuda")
+        device = torch.device("cuda:1")
+        batch_size = 24
+        num_workers = 8
 
-    model = CNN3D(1,2).to(device)
+    backbone = folder_path.split('_')[-1]
 
-    train_path = 'Model_Train/'
+    if backbone == 'custom':
+        model = CNN3D(1,2).to(device)
+
+    else:
+        model = Unet(
+            backbone=backbone, # backbone network name
+            in_channels=1,            # input channels (1 for gray-scale images, 3 for RGB, etc.)
+            num_classes=2,            # output channels (number of classes in your dataset)
+        ).to(device)  
+
+    train_path = 'Model_Train/' + folder_path + '/'
 
     epoch = int(epoch)
     
-    model_name = "model_summed_aug_"+"epoch_{}".format(epoch)
+    model_name = "model_epoch_{}".format(epoch)
 
     model.load_state_dict(torch.load(train_path+model_name + ".pth", map_location=device))
     model.eval()
 
     dataset = FrondandDiff()
-            
+    
     indices = dataset.test_data_idx
     dataset_sub = torch.utils.data.Subset(dataset, indices)
-
-    batch_size = 2
-    num_workers = 2
 
     data_loader = torch.utils.data.DataLoader(
                                                 dataset_sub,
@@ -442,21 +531,19 @@ def test(epoch):
 
         pred = model(input_data)
 
-        metrics = evaluation_summed_aug.evaluate(pred.cpu().detach(),data[1].numpy(),data[0].cpu().detach(), model_name)
+        metrics = evaluation.evaluate(pred.cpu().detach(),data[1].numpy(),data[0].cpu().detach(), model_name, folder_path)
 
         save_metrics.append(metrics)
 
     save_metrics = np.nanmean(save_metrics, axis=0)
-    
-    print('Saving metrics...')
 
-    metrics_path = 'Model_Metrics/'
+    metrics_path = 'Model_Metrics/' + folder_path + '/'
 
     if not os.path.exists(metrics_path): 
         os.makedirs(metrics_path, exist_ok=True) 
 
     np.save(metrics_path+model_name+'.npy', save_metrics)
-    print(time.time()-start)
 
 if __name__ == "__main__":
-    train()
+    backbone = sys.argv[1]
+    train(backbone=backbone)

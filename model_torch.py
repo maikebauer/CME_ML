@@ -16,6 +16,7 @@ import os
 import csv
 from backbones_unet.model.unet import Unet
 from datetime import datetime
+from skimage.morphology import binary_dilation, disk
 
 class FrondandDiff(Dataset):
     def __init__(self, transform=None):
@@ -149,8 +150,17 @@ class FrondandDiff(Dataset):
             for i in range(len(GT)):
                 GT[i] = cv2.resize(GT[i]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
 
-        GT = np.array(GT)
+        dilation = False
 
+        if dilation:
+            radius = int(width_par/20)
+            kernel = disk(radius)
+
+            for i in range(len(GT)):
+                GT[i] = binary_dilation(GT[i], footprint=kernel)
+
+        GT = np.array(GT)
+        
         cme_pix = np.any(GT, axis=0)*255
         bg_pix = np.all(GT==0, axis=0)*255
 

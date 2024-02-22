@@ -19,15 +19,15 @@ eval "$(conda shell.bash hook)"
 
 conda activate cme_ml
 
-mode="Train" #Test
+mode="Test" #Test
 
-declare -a epoch=(0 5 10 15 20 30 40 50 60 70 80 90 100 120 140 160 180 200 250 300 350 400) #0 5 10 15 20 30 40 50 60 70 80 90 100 120 140 160 180 200 250 300 350 400
+declare -a epoch=(0 5 10) #0 5 10 15 20 30 40 50 60 70 80 90 100 120 140 160 180 200 250 300 350 400
 
 model_run="model_torch.py"
 eval_run="evaluation.py"
 eval_folder="run_14022024_140713_model_resnet34"
 
-backbone="resnet34"
+backbone="cnn3d"
 
 if [ "$mode" = "Train" ]
 then

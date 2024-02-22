@@ -1,10 +1,10 @@
-import torch
-from torch import nn,optim
+import matplotlib
+matplotlib.use('Agg')
+
+from torch import nn
 import torch.nn.functional as F
-import glob
 from torch.utils.data import Dataset
 from PIL import Image
-import cv2
 from pycocotools import coco
 import matplotlib.pyplot as plt 
 import numpy as np
@@ -15,7 +15,8 @@ import model_torch
 from matplotlib.colors import ListedColormap
 from datetime import datetime
 import os
-import csv
+
+
 
 def Kappa_cohen(predictions,groundtruth):
     # True Positive (TP): we predict a label of 1 (positive), and the true label is 1.
@@ -29,14 +30,14 @@ def Kappa_cohen(predictions,groundtruth):
     
     # False Negative (FN): we predict a label of 0 (negative), but the true label is 1.
     FN   = np.sum(np.logical_and(predictions == 0, groundtruth ==  1))
-    gt_p = np.sum(groundtruth ==  0)
-    gt_r = np.sum(groundtruth ==  1)
-        
+    gt_neg = np.sum(groundtruth ==  0)
+    gt_pos = np.sum(groundtruth ==  1)
+    
+    sum_total = (np.shape(groundtruth)[0]*np.shape(groundtruth)[1]+np.shape(predictions)[0]*np.shape(predictions)[1])
+    observed_accuracy  =   (TP+TN)/sum_total
+    expected_accuracy  =   ((gt_pos*(TP+FP))/sum_total + (gt_neg*(TN+FN))/sum_total)/sum_total
 
-    observed_accuracy  =   (TP+TN)/groundtruth.shape[0]
-    expected_accuracy  =   ((gt_r*TP)/groundtruth.shape[0] + (gt_p*TN)/groundtruth.shape[0])/groundtruth.shape[0]
-
-    return (observed_accuracy - expected_accuracy)/ (1- expected_accuracy +0.000005)
+    return (observed_accuracy - expected_accuracy)/ (1- expected_accuracy)
 
 def precision_recall(predictions,groundtruth):
     # True Positive (TP): we predict a label of 1 (positive), and the true label is 1.
@@ -110,7 +111,7 @@ def confusion_images(predictions,groundtruth):
 
     return  TP, TN, FP, FN
 
-def evaluate(pred, gt, img, model_name, folder_path):
+def evaluate(pred, gt, img, model_name, folder_path, batch_no):
 
     thresholds = np.round(np.linspace(0.5,0.95,10),2)
     thresholds = np.append(thresholds, 0.99)
@@ -118,8 +119,14 @@ def evaluate(pred, gt, img, model_name, folder_path):
     metrics = []
     smax = nn.Softmax2d()
 
+    im_path = 'Model_Metrics/'+folder_path+'/images/'
+
+    if not os.path.exists(im_path): 
+        os.makedirs(im_path, exist_ok=True) 
+
     for num, t in enumerate(thresholds):
         metrics_batch = []
+
         for p, res in enumerate(pred):
             res = smax(res)
                      
@@ -133,9 +140,10 @@ def evaluate(pred, gt, img, model_name, folder_path):
             iou = IoU(mask,gt[p][0]) ## main metric to look at, take the mean over dataset or over thresholds 
             acc = Accuracy(mask,gt[p][0]) #no need to explain
             confusion_matrix = [[TP, FN], [FP, TN]]
+
             TP, TN, FP, FN = confusion_images(mask,gt[p][0])
 
-            if (np.sum(gt[p][0]) > 0) & (t >= 0.8) & (p == 0):
+            if (np.sum(gt[p][0]) > 0) & (t >= 0.8) & (p == 0) & (batch_no == 0):
 
                 fig,ax = plt.subplots(1, figsize=(5,5))
                 
@@ -157,11 +165,6 @@ def evaluate(pred, gt, img, model_name, folder_path):
                 
                 ax.axis("off")
                 plt.tight_layout()
-                
-                im_path = 'Model_Metrics/'+folder_path+'/images/'
-
-                if not os.path.exists(im_path): 
-                    os.makedirs(im_path, exist_ok=True) 
 
                 plt.savefig(im_path+model_name+'_test_t'+'{:.2f}'.format(t)+'.png', dpi=100, bbox_inches='tight', pad_inches=0)
                 plt.close()

@@ -60,21 +60,36 @@ class FrondandDiff(Dataset):
         self.events = event_list
 
         self.not_annotated = np.setdiff1d(np.arange(0,len(self.img_ids)),np.array(self.annotated))
-        
-        seed = 1997
 
-        np.random.seed(seed)
-        self.not_annotated = self.not_annotated[np.random.choice(len(self.not_annotated), len(self.annotated), replace=False)]
+        # no_event_list = []
+        # temp_list = []
 
-        self.annotated = list(self.annotated) + list(self.not_annotated)
+        # a_id_prev = 0
 
-        self.annotated = sorted(self.annotated)
+        # for a in self.not_annotated:
 
-        len_train_noevents = int(np.floor(len(self.not_annotated)*0.8))
+        #     if (a - a_id_prev == 1) or (a_id_prev == 0):
 
-        seed = 1997
-        np.random.seed(seed)
-        rand_arr_noevent = np.random.choice(int(len(self.not_annotated)), len_train_noevents, replace=False)
+        #         temp_list.append(a)
+
+        #     elif (a - a_id_prev) > 1:
+
+        #         if len(temp_list) > 0:
+        #             no_event_list.append(temp_list)
+
+        #         temp_list = []
+         
+        #     a_id_prev = a.copy()
+
+        #seed = 1997
+
+        #np.random.seed(seed)
+        #self.not_annotated = self.not_annotated[np.random.choice(len(self.not_annotated), len(self.annotated), replace=False)]
+
+        all_anns = list(self.annotated) + list(self.not_annotated)
+        all_anns = sorted(all_anns)
+
+        self.all_anns = all_anns
 
         len_train_events = int(np.floor(len(self.events)*0.8))
 
@@ -85,22 +100,27 @@ class FrondandDiff(Dataset):
         train_data = []
         test_data = []
 
-        for i in np.arange(len(self.not_annotated)):
-            
-            if i in rand_arr_noevent:
-                train_data.append(self.not_annotated[i])
-            else:
-                test_data.append(self.not_annotated[i])
-
         for i in np.arange(len(self.events)):
             if i in rand_arr:
                 train_data.extend(self.events[i])
             else:
                 test_data.extend(self.events[i])
 
+        len_train_noevents = len(train_data)
+        len_test_noevents = len(test_data)
+
+        seed = 1997
+        np.random.seed(seed)
+        rand_arr_noevent_train = np.random.choice(self.not_annotated, len_train_noevents, replace=False)
+
+        test_noevents = np.setdiff1d(self.not_annotated, rand_arr_noevent_train)
+        rand_arr_noevent_test = np.random.choice(test_noevents, len_test_noevents, replace=False)
+
+        train_data.extend(rand_arr_noevent_train)
+        test_data.extend(rand_arr_noevent_test)
+
         self.train_data_idx = sorted(train_data)
         self.test_data_idx = sorted(test_data)
-        
 
     def get_img_and_annotation(self,idx):
 
@@ -153,7 +173,7 @@ class FrondandDiff(Dataset):
         dilation = False
 
         if dilation:
-            radius = int(width_par/20)
+            radius = int(3)
             kernel = disk(radius)
 
             for i in range(len(GT)):
@@ -197,7 +217,7 @@ class FrondandDiff(Dataset):
         return torch.tensor(im).unsqueeze(0), torch.tensor(GT)
 
     def __len__(self):
-        return len(self.annotated)
+        return len(self.all_anns)
 
     def __getitem__(self, index):
        
@@ -251,9 +271,6 @@ class CNN3D(nn.Module):
 
         self.decoder_convtr_01 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=64,out_channels=64,kernel_size=3,padding=1)])
         self.decoder_convtr_00 = nn.Sequential(*[nn.ConvTranspose2d(in_channels=64,out_channels=self.output_channels,kernel_size=3,padding=1)])
-
-
-        self.sigmoid = nn.Sigmoid()
 
     def forward(self, input_img):
         # Encoder Stage - 1
@@ -347,7 +364,7 @@ def train(backbone):
         batch_size = 24
         num_workers = 8
 
-    if backbone == 'custom':
+    if backbone == 'cnn3d':
         model = CNN3D(1,2).to(device)
 
     else:
@@ -503,7 +520,7 @@ def test(epoch, folder_path):
 
     backbone = folder_path.split('_')[-1]
 
-    if backbone == 'custom':
+    if backbone == 'cnn3d':
         model = CNN3D(1,2).to(device)
 
     else:
@@ -536,12 +553,13 @@ def test(epoch, folder_path):
                                             )
     save_metrics = []
 
-    for p, data in enumerate(data_loader, 0):
+    for batch_no, data in enumerate(data_loader, 0):
+
         input_data = data[0].float().to(device)
 
         pred = model(input_data)
 
-        metrics = evaluation.evaluate(pred.cpu().detach(),data[1].numpy(),data[0].cpu().detach(), model_name, folder_path)
+        metrics = evaluation.evaluate(pred.cpu().detach(),data[1].numpy(),data[0].cpu().detach(), model_name, folder_path, batch_no)
 
         save_metrics.append(metrics)
 

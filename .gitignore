@@ -47,6 +47,8 @@ Thumbs.db
 *.pth
 *.npy
 output.txt
+Flowattempt.py
+message.py
 
 # Folders to ignore #
 ###################

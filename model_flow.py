@@ -590,6 +590,11 @@ def train():
             torch.save(model.state_dict(), train_path+model_name+'.pth')               
             torch.save(g_optimizer.state_dict(), train_path+model_name+'_weights.pth')
 
+    os.makedirs(os.path.dirname(train_path), exist_ok=True)
+    
+    with open(train_path + "model_loss.csv", 'w') as csvfile:
+        filewriter = csv.writer(csvfile, delimiter=',')
+        filewriter.writerow(optimizer_data)
 
 if __name__ == "__main__":
     train()

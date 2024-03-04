@@ -677,7 +677,7 @@ def train(backbone):
 
         if epoch % 5 == 0:
             torch.save(model.state_dict(), train_path+model_name+'.pth')
-            # torch.save(g_optimizer.state_dict(), train_path+model_name+'_optimizer.pth')
+            torch.save(g_optimizer.state_dict(), train_path+model_name+'_weights.pth')
 
     os.makedirs(os.path.dirname(train_path), exist_ok=True)
 

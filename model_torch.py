@@ -17,9 +17,139 @@ import csv
 from backbones_unet.model.unet import Unet
 from datetime import datetime
 from skimage.morphology import binary_dilation, disk
+from numpy.random import default_rng
 
+
+def sep_noevent_data(data_noevent):
+
+    temp_list = []
+    data_nocme = []
+
+    ev_id_prev = 0
+    
+    for i, noev in enumerate(data_noevent):
+
+        if (noev - ev_id_prev == 1) or (ev_id_prev == 0):
+
+            temp_list.append(i)
+
+        elif (noev - ev_id_prev) > 1:
+
+            if len(temp_list) > 0:
+                data_nocme.append(temp_list)
+
+            temp_list = []
+    
+        ev_id_prev = data_noevent[i]
+    
+    return data_nocme
+
+class FNet(nn.Module):
+    """ Optical flow estimation network
+    """
+
+    def __init__(self, in_nc):
+        super(FNet, self).__init__()
+
+        self.encoder1 = nn.Sequential(
+            nn.Conv2d(2*in_nc, 32, 3, 1, 1, bias=True),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(32, 32, 3, 1, 1, bias=True),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.MaxPool2d(2, 2))
+
+        self.encoder2 = nn.Sequential(
+            nn.Conv2d(32, 64, 3, 1, 1, bias=True),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(64, 64, 3, 1, 1, bias=True),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.MaxPool2d(2, 2))
+
+        self.encoder3 = nn.Sequential(
+            nn.Conv2d(64, 128, 3, 1, 1, bias=True),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(128, 128, 3, 1, 1, bias=True),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.MaxPool2d(2, 2))
+
+        self.decoder1 = nn.Sequential(
+            nn.Conv2d(128, 256, 3, 1, 1, bias=True),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(256, 256, 3, 1, 1, bias=True),
+            nn.LeakyReLU(0.2, inplace=True))
+
+        self.decoder2 = nn.Sequential(
+            nn.Conv2d(256, 128, 3, 1, 1, bias=True),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(128, 128, 3, 1, 1, bias=True),
+            nn.LeakyReLU(0.2, inplace=True))
+
+        self.decoder3 = nn.Sequential(
+            nn.Conv2d(128, 64, 3, 1, 1, bias=True),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(64, 64, 3, 1, 1, bias=True),
+            nn.LeakyReLU(0.2, inplace=True))
+
+        self.flow = nn.Sequential(
+            nn.Conv2d(64, 32, 3, 1, 1, bias=True),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(32, 2, 3, 1, 1, bias=True))
+
+    def forward(self, x1, x2):
+        """ Compute optical flow from x1 to x2
+        """
+
+        out = self.encoder1(torch.cat([x1, x2], dim=1))
+        out = self.encoder2(out)
+        out = self.encoder3(out)
+        out = F.interpolate(
+            self.decoder1(out), scale_factor=2, mode='bilinear', align_corners=False)
+        out = F.interpolate(
+            self.decoder2(out), scale_factor=2, mode='bilinear', align_corners=False)
+        out = F.interpolate(
+            self.decoder3(out), scale_factor=2, mode='bilinear', align_corners=False)
+        out = torch.tanh(self.flow(out)) * 24  # 24 is the max velocity
+
+        return out
+    
+def backward_warp(x, flow, mode='bilinear', padding_mode='border'):
+    """ Backward warp `x` according to `flow`
+
+        Both x and flow are pytorch tensor in shape `nchw` and `n2hw`
+
+        Reference:
+            https://github.com/sniklaus/pytorch-spynet/blob/master/run.py#L41
+    """
+
+    n, c, h, w = x.size()
+
+    # create mesh grid
+    iu = torch.linspace(-1.0, 1.0, w).view(1, 1, 1, w).expand(n, -1, h, -1)
+    iv = torch.linspace(-1.0, 1.0, h).view(1, 1, h, 1).expand(n, -1, -1, w)
+    grid = torch.cat([iu, iv], 1).to(flow.device)
+
+    # normalize flow to [-1, 1]
+    flow = torch.cat([
+        flow[:, 0:1, ...] / ((w - 1.0) / 2.0),
+        flow[:, 1:2, ...] / ((h - 1.0) / 2.0)], dim=1)
+
+    # add flow to grid and reshape to nhw2
+    grid = (grid + flow).permute(0, 2, 3, 1)
+
+    # bilinear sampling
+    # Note: `align_corners` is set to `True` by default for PyTorch version < 1.4.0
+    if int(''.join(torch.__version__.split('.')[:2])) >= 14:
+        output = F.grid_sample(
+            x, grid, mode=mode, padding_mode=padding_mode, align_corners=True)
+    else:
+        output = F.grid_sample(x, grid, mode=mode, padding_mode=padding_mode)
+
+    return output
+    
 class FrondandDiff(Dataset):
     def __init__(self, transform=None):
+        
+        rng = default_rng()
 
         self.transform = transform
 
@@ -56,71 +186,127 @@ class FrondandDiff(Dataset):
          
                 a_id_prev = self.img_ids[a]
 
-
+        
         self.events = event_list
 
-        self.not_annotated = np.setdiff1d(np.arange(0,len(self.img_ids)),np.array(self.annotated))
+        len_train = int(len(self.annotated)*0.7)
+        boundary_train = self.annotated[len_train]
 
-        # no_event_list = []
-        # temp_list = []
+        for index, ev in enumerate(self.events):
+            if boundary_train in ev:
+                index_train = index + 1
+                break
+            else:
+                continue
 
-        # a_id_prev = 0
+        train_data = self.events[:index_train]
 
-        # for a in self.not_annotated:
+        len_val = int(len(self.annotated)*0.1)
+        boundary_val = self.annotated[len_train+len_val]
 
-        #     if (a - a_id_prev == 1) or (a_id_prev == 0):
+        for index, ev in enumerate(self.events):
+            if boundary_val in ev:
+                index_val = index + 1
+                break
+            else:
+                continue
+        
+        val_data = self.events[index_train:index_val]
 
-        #         temp_list.append(a)
+        test_data = self.events[index_val:]
 
-        #     elif (a - a_id_prev) > 1:
+        train_data_cme = []
 
-        #         if len(temp_list) > 0:
-        #             no_event_list.append(temp_list)
+        for sublist in train_data:
+            train_data_cme.append(np.lib.stride_tricks.sliding_window_view(sublist,2))
+        
+        train_data_cme = np.array([element for innerList in train_data_cme for element in innerList])
 
-        #         temp_list = []
-         
-        #     a_id_prev = a.copy()
+        val_data_cme = []
 
-        #seed = 1997
+        for sublist in val_data:
+            val_data_cme.append(np.lib.stride_tricks.sliding_window_view(sublist,2))
 
-        #np.random.seed(seed)
-        #self.not_annotated = self.not_annotated[np.random.choice(len(self.not_annotated), len(self.annotated), replace=False)]
+        val_data_cme = np.array([element for innerList in val_data_cme for element in innerList])
+
+        test_data_cme = []
+
+        for sublist in test_data:
+            test_data_cme.append(np.lib.stride_tricks.sliding_window_view(sublist,2))
+
+        test_data_cme = np.array([element for innerList in test_data_cme for element in innerList])
+
+        train_data = [element for innerList in train_data for element in innerList]
+        train_data = np.array(train_data)
+
+        val_data = [element for innerList in val_data for element in innerList]
+        val_data = np.array(val_data)
+
+        test_data = [element for innerList in test_data for element in innerList]
+        test_data = np.array(test_data)
+
+        train_data_noevent = np.arange(np.nanmin(train_data), np.nanmin(val_data))
+        train_data_noevent = np.setdiff1d(train_data_noevent, train_data) 
+
+        val_data_noevent = np.arange(np.nanmin(val_data), np.nanmin(test_data))
+        val_data_noevent = np.setdiff1d(val_data_noevent, val_data)
+
+        test_data_noevent = np.arange(np.nanmin(test_data), np.nanmax(self.img_ids))
+        test_data_noevent = np.setdiff1d(test_data_noevent, test_data)
+        
+        train_data_noevent = sep_noevent_data(train_data_noevent)
+        val_data_noevent = sep_noevent_data(val_data_noevent)
+        test_data_noevent = sep_noevent_data(test_data_noevent)
+
+        win_size = 2
+
+        train_data_nocme = []
+
+        for sublist in train_data_noevent:
+            train_data_nocme.append(np.lib.stride_tricks.sliding_window_view(sublist,win_size))
+
+        train_data_nocme = np.array([element for innerList in train_data_nocme for element in innerList])
+
+        val_data_nocme = []
+
+        for sublist in val_data_noevent:
+            val_data_nocme.append(np.lib.stride_tricks.sliding_window_view(sublist,win_size))
+
+        val_data_nocme = np.array([element for innerList in val_data_nocme for element in innerList])
+
+        test_data_nocme = []
+
+        for sublist in test_data_noevent:
+            test_data_nocme.append(np.lib.stride_tricks.sliding_window_view(sublist,win_size))
+
+        test_data_nocme = np.array([element for innerList in test_data_nocme for element in innerList])
+
+        not_annotated = np.array(np.setdiff1d(np.arange(0,len(self.img_ids)),np.array(self.annotated)))
+        self.not_annotated = not_annotated
+
+        seed = 1997
+        np.random.seed(seed)
+
+        train_data = np.concatenate([train_data,np.random.choice(self.not_annotated[(self.not_annotated < boundary_train) & (self.not_annotated > train_data[0])], len(train_data), replace=False)])
+        val_data = np.concatenate([val_data,np.random.choice(self.not_annotated[(self.not_annotated < boundary_val) & (self.not_annotated > val_data[0])], len(val_data), replace=False)])
+        test_data = np.concatenate([test_data,np.random.choice(self.not_annotated[(self.not_annotated > boundary_val) & (self.not_annotated < test_data[-1])], len(test_data), replace=False)])
+        
+        train_data_paired = np.concatenate([train_data_cme, train_data_nocme[rng.choice(len(train_data_nocme), size=len(train_data_cme), replace=False)]])
+        val_data_paired = np.concatenate([val_data_cme, val_data_nocme[rng.choice(len(val_data_nocme), size=len(val_data_cme), replace=False)]])
+        test_data_paired = np.concatenate([test_data_cme, test_data_nocme[rng.choice(len(test_data_nocme), size=len(test_data_cme), replace=False)]])
+
+        self.train_data_idx = sorted(train_data)
+        self.val_data_idx = sorted(val_data)
+        self.test_data_idx = sorted(test_data)
+
+        self.train_paired_idx = train_data_paired
+        self.val_paired_idx = val_data_paired
+        self.test_paired_idx = test_data_paired
 
         all_anns = list(self.annotated) + list(self.not_annotated)
         all_anns = sorted(all_anns)
 
         self.all_anns = all_anns
-
-        len_train_events = int(np.floor(len(self.events)*0.8))
-
-        seed = 1997
-        np.random.seed(seed)
-        rand_arr = np.random.choice(int(len(self.events)), len_train_events, replace=False)
-
-        train_data = []
-        test_data = []
-
-        for i in np.arange(len(self.events)):
-            if i in rand_arr:
-                train_data.extend(self.events[i])
-            else:
-                test_data.extend(self.events[i])
-
-        len_train_noevents = len(train_data)
-        len_test_noevents = len(test_data)
-
-        seed = 1997
-        np.random.seed(seed)
-        rand_arr_noevent_train = np.random.choice(self.not_annotated, len_train_noevents, replace=False)
-
-        test_noevents = np.setdiff1d(self.not_annotated, rand_arr_noevent_train)
-        rand_arr_noevent_test = np.random.choice(test_noevents, len_test_noevents, replace=False)
-
-        train_data.extend(rand_arr_noevent_train)
-        test_data.extend(rand_arr_noevent_test)
-
-        self.train_data_idx = sorted(train_data)
-        self.test_data_idx = sorted(test_data)
 
     def get_img_and_annotation(self,idx):
 
@@ -132,11 +318,11 @@ class FrondandDiff(Dataset):
             
             if os.path.isdir('/home/mbauer/Data/'):
                 path = "/home/mbauer/Data/differences_clahe/"
-                width_par = 128
+                width_par = 512
             
             elif os.path.isdir('/gpfs/data/fs72241/maibauer/'):
                 path = "/gpfs/data/fs72241/maibauer/differences_clahe/"
-                width_par = 128
+                width_par = 512
 
             else:
                 raise FileNotFoundError('No folder with differences found. Please check path.')
@@ -383,9 +569,8 @@ def train(backbone):
         dataset = FrondandDiff()
 
     indices = dataset.train_data_idx
-
+       
     dataset_sub = torch.utils.data.Subset(dataset, indices)
-
 
     data_loader = torch.utils.data.DataLoader(
                                                 dataset_sub,
@@ -435,14 +620,16 @@ def train(backbone):
 
     for epoch in range(0, num_iter):
         epoch_loss = 0
+        model_name = "model_epoch_{}".format(epoch)
 
-        for p, data in enumerate(data_loader, 0):
+        for num, data in enumerate(data_loader, 0):
             
             start = time.time()
             g_optimizer.zero_grad()
 
             input_data = data[0].float().to(device)
             mask_data = data[1].float().to(device)
+
             pred = model(input_data)
             loss = pixel_looser(pred, mask_data)
 
@@ -452,11 +639,9 @@ def train(backbone):
             epoch_loss += loss.item()
             # print(loss,time.time()-start)
 
-        epoch_loss = epoch_loss/(data_loader.__len__())
+        epoch_loss = epoch_loss/(num+1)
 
         optimizer_data.append([epoch, epoch_loss])
-
-        model_name = "model_epoch_{}".format(epoch)
 
         hspace = 0.01
         wspace = 0.01

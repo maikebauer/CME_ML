@@ -318,11 +318,11 @@ class FrondandDiff(Dataset):
             
             if os.path.isdir('/home/mbauer/Data/'):
                 path = "/home/mbauer/Data/differences_clahe/"
-                width_par = 512
+                width_par = 128
             
             elif os.path.isdir('/gpfs/data/fs72241/maibauer/'):
                 path = "/gpfs/data/fs72241/maibauer/differences_clahe/"
-                width_par = 512
+                width_par = 128
 
             else:
                 raise FileNotFoundError('No folder with differences found. Please check path.')
@@ -629,8 +629,9 @@ def train(backbone):
 
             input_data = data[0].float().to(device)
             mask_data = data[1].float().to(device)
-
+            
             pred = model(input_data)
+            
             loss = pixel_looser(pred, mask_data)
 
             loss.backward()

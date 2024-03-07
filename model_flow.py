@@ -317,6 +317,7 @@ class FrondandDiff(Dataset):
         im_all = []
 
         for idx in idxs:
+            
             img_id   = self.img_ids[idx]
             img_info = self.coco_obj.loadImgs([img_id])[0]
             img_file_name = img_info["file_name"].split('/')[-1]
@@ -325,11 +326,11 @@ class FrondandDiff(Dataset):
                 
                 if os.path.isdir('/home/mbauer/Data/'):
                     path = "/home/mbauer/Data/differences_clahe/"
-                    width_par = 512
+                    width_par = 128
                 
                 elif os.path.isdir('/gpfs/data/fs72241/maibauer/'):
                     path = "/gpfs/data/fs72241/maibauer/differences_clahe/"
-                    width_par = 512
+                    width_par = 128
 
                 else:
                     raise FileNotFoundError('No folder with differences found. Please check path.')
@@ -376,18 +377,20 @@ class FrondandDiff(Dataset):
             
             cme_pix = np.any(GT, axis=0)*255
             bg_pix = np.all(GT==0, axis=0)*255
-        
+            
             if self.transform:
+                torch.manual_seed(seed)
                 im = im.astype(np.uint8)
                 im = self.transform(im)
                 im = np.asarray(im.convert("L"))/255.0
             else:
                 im = im/255.0
-
             if self.transform:
+                torch.manual_seed(seed)
                 cme_pix = cme_pix.astype(np.uint8)
                 cme_pix = self.transform(cme_pix)
-            
+
+                torch.manual_seed(seed)
                 bg_pix = bg_pix.astype(np.uint8)
                 bg_pix = self.transform(bg_pix)
 
@@ -417,26 +420,61 @@ class FrondandDiff(Dataset):
         return self.get_img_and_annotation(index)
     
 
-def charbonnier_loss(delta, alpha=0.45, epsilon=1e-3):
+def charbonnier_loss(delta, gamma=0.45, epsilon=1e-6):
     """
     Robust Charbonnier loss, as defined in equation (4) of the paper.
     """
-    loss = torch.mean(torch.pow((delta ** 2 + epsilon ** 2), alpha))
+    loss = torch.mean(torch.pow((delta ** 2 + epsilon ** 2), gamma))
     return loss
 
-def miou_loss(pred_im2, real_im2):
-    """
-    Differentiable mean IOU loss, as defined in Varghese 2021, equation 11.
-    """
-    
-    prod_im2 = pred_im2 * real_im2
+class spatial_smoothing_loss(nn.Module):
+    #from https://akshay-sharma1995.github.io/files/ml_temp_loss.pdf
+    def __init__(self, device):
+        super(spatial_smoothing_loss, self).__init__()
+        self.eps = 1e-6
+        self.device = device
 
-    sum_im2 = pred_im2 + real_im2
+    def forward(self, X):  # X is flow map
+        u = X[:, 0:1]
+        # Rest of the code
+        v = X[:,1:2]
+        # print("u",u.size())
+        hf1 = torch.tensor([[[[0,0,0],[-1,2,-1],[0,0,0]]]]).type(torch.FloatTensor).to(self.device)
+        hf2 = torch.tensor([[[[0,-1,0],[0,2,0],[0,-1,0]]]]).type(torch.FloatTensor).to(self.device)
+        hf3 = torch.tensor([[[[-1,0,-1],[0,4,0],[-1,0,-1]]]]).type(torch.FloatTensor).to(self.device)
+        # diff = torch.add(X, -Y)
+        
+        u_hloss = F.conv2d(u,hf1,padding=1,stride=1)
+        # print("uhloss",type(u_hloss))
+        u_vloss = F.conv2d(u,hf2,padding=1,stride=1)
+        u_dloss = F.conv2d(u,hf3,padding=1,stride=1)
 
-    loss = torch.sum(torch.abs(prod_im2))/torch.sum(torch.abs(sum_im2 - prod_im2))
+        v_hloss = F.conv2d(v,hf1,padding=1,stride=1)
+        v_vloss = F.conv2d(v,hf2,padding=1,stride=1)
+        v_dloss = F.conv2d(v,hf3,padding=1,stride=1)
 
-    return loss
+        u_hloss = charbonier(u_hloss,self.eps)
+        u_vloss = charbonier(u_vloss,self.eps)
+        u_dloss = charbonier(u_dloss,self.eps)
 
+        v_hloss = charbonier(v_hloss,self.eps)
+        v_vloss = charbonier(v_vloss,self.eps)
+        v_dloss = charbonier(v_dloss,self.eps)
+
+
+        # error = torch.sqrt( diff * diff + self.eps )
+        # loss = torch.sum(error) 
+        loss = u_hloss + u_vloss + u_dloss + v_hloss + v_vloss + v_dloss
+        # print('char_losss',loss)
+        return loss 
+
+def charbonier(x,eps):
+	gamma = 0.45
+	# print("x.type",type(x))
+	loss = x*x + eps*eps
+	loss = torch.pow(loss,gamma)
+	loss = torch.mean(loss)
+	return loss
 
 def train():
 
@@ -456,7 +494,7 @@ def train():
         device = torch.device("cuda:1")
         batch_size = 24
         num_workers = 8
-        width_par = 512
+        width_par = 128
     
     composed = v2.Compose([v2.ToPILImage(), v2.RandomHorizontalFlip(p=0.5), v2.RandomRotation((0, 360)), v2.RandomVerticalFlip(p=0.5)])
     
@@ -497,6 +535,8 @@ def train():
     os.makedirs(os.path.dirname(train_path), exist_ok=True)
     os.makedirs(os.path.dirname(im_path), exist_ok=True)
 
+    s_loss_model = spatial_smoothing_loss(device)
+
     for epoch in range(num_iter):
         epoch_loss = 0
         model_name = "model_epoch_{}".format(epoch)
@@ -520,7 +560,11 @@ def train():
             mw1 = backward_warp(mask1,flow)
 
             difference = im2 - bw1
-            loss = charbonnier_loss(difference)
+            loss_mse = F.mse_loss(bw1, im2)
+            loss_spatial_char = s_loss_model(flow)
+
+            loss = loss_mse + loss_spatial_char
+            #loss = charbonnier_loss(difference)
 
             loss.backward()
             g_optimizer.step()
@@ -591,7 +635,7 @@ def train():
             torch.save(g_optimizer.state_dict(), train_path+model_name+'_weights.pth')
 
     os.makedirs(os.path.dirname(train_path), exist_ok=True)
-    
+
     with open(train_path + "model_loss.csv", 'w') as csvfile:
         filewriter = csv.writer(csvfile, delimiter=',')
         filewriter.writerow(optimizer_data)

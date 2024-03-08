@@ -24,6 +24,7 @@ from model_torch import CNN3D
 from matplotlib.colors import ListedColormap
 import evaluation
 import copy
+from unetr import UNETR
 
 def miou_loss(pred_im2, real_im2):
     """
@@ -55,8 +56,8 @@ def train(backbone):
 
     elif(torch.cuda.is_available()):
         device = torch.device("cuda:1")
-        batch_size = 24
-        num_workers = 8
+        batch_size = 1
+        num_workers = 1
         width_par = 128
     
     composed = v2.Compose([v2.ToPILImage(), v2.RandomHorizontalFlip(p=0.5), v2.RandomRotation((0, 360)), v2.RandomVerticalFlip(p=0.5)])
@@ -100,6 +101,20 @@ def train(backbone):
     if backbone == 'cnn3d':
         model_seg = CNN3D(1,2).to(device)
 
+    elif backbone == 'unetr':
+        model_seg = UNETR(in_channels=1,
+        out_channels=2,
+        img_size=(width_par, width_par, 2),
+        feature_size=16,
+        hidden_size=768,
+        mlp_dim=3072,
+        num_heads=12,
+        pos_embed='perceptron',
+        norm_name='instance',
+        conv_block=True,
+        res_block=True,
+        dropout_rate=0.0).to(device)
+
     else:
         model_seg = Unet(
             backbone=backbone, # backbone network name
@@ -125,20 +140,23 @@ def train(backbone):
 
     weights = np.zeros(2)
 
-    for data in data_loader:
-        mask_data = data['gt'].float().to(device).cpu().numpy()
-        for b in range(np.shape(mask_data)[0]):
-            for j in range(2):
-                cme_data = mask_data[b,j,0,:,:]
-                bg_data = mask_data[b,j,1,:,:]
-                cme_count = cme_count + np.sum(cme_data)
-                bg_count = bg_count + np.sum(bg_data)
+    # for data in data_loader:
+    #     mask_data = data['gt'].float().to(device).cpu().numpy()
+    #     for b in range(np.shape(mask_data)[0]):
+    #         for j in range(2):
+    #             cme_data = mask_data[b,j,0,:,:]
+    #             bg_data = mask_data[b,j,1,:,:]
+    #             cme_count = cme_count + np.sum(cme_data)
+    #             bg_count = bg_count + np.sum(bg_data)
 
-    n_samples = cme_count + bg_count
-    n_classes = 2
+    # n_samples = cme_count + bg_count
+    # n_classes = 2
 
-    weights[0] = (n_samples/(n_classes*cme_count))/2
-    weights[1] = (n_samples/(n_classes*bg_count))/1
+    # weights[0] = (n_samples/(n_classes*cme_count))/2
+    # weights[1] = (n_samples/(n_classes*bg_count))/1
+
+    weights[0] = 50.0
+    weights[1] = 1.0
 
     weights = torch.tensor(weights).to(device, dtype=torch.float32)
 
@@ -184,28 +202,41 @@ def train(backbone):
             mask_comb1 = torch.cat((mask1,mask_data[:,0,1,:,:].unsqueeze(1)),1)
             mask_comb2 = torch.cat((mask2,mask_data[:,1,1,:,:].unsqueeze(1)),1)
             
+
             flow = model_flow(im2,im1)
 
-            pred1 = model_seg(im1)
-            pred_smax1 = smax(pred1)
-            pred_bin1 = torch.where(pred_smax1[:,0,:,:] > 0.5, 1, 0).unsqueeze(1).float().to(device)
+            if backbone == 'unetr':
+                
+                im_concat = torch.cat((im1,im2),1)
+                im_concat = torch.permute(im_concat, (0, 2, 3, 1)).unsqueeze(1)
+                pred1 = model_seg(im_concat)
+            
+            else:
+                pred1 = model_seg(im1)
 
-            pred2 = model_seg(im2)
-            pred_smax2 = smax(pred2)
-            pred_bin2 = torch.where(pred_smax2[:,0,:,:] > 0.5, 1, 0).unsqueeze(1).float().to(device)
+            print(pred1.shape)
 
-            predw1 = backward_warp(pred_bin1,flow)
-            bw1 = backward_warp(im1,flow)
-            mw1 = backward_warp(mask1,flow)
-            difference1 = im2 - bw1
 
-            loss_seg = pixel_looser(pred1, mask_comb1)
-            tc_loss = 1 - miou_loss(predw1, pred_bin2)
-            mse_loss = F.mse_loss(bw1, im2)
-            ch_loss = s_loss(flow)
+            total_loss = pixel_looser(pred1[:,:,0,:,:], mask_comb1) + pixel_looser(pred1[:,:,1,:,:], mask_comb2)
+            # pred_smax1 = smax(pred1)
+            # pred_bin1 = torch.where(pred_smax1[:,0,:,:] > 0.5, 1, 0).unsqueeze(1).float().to(device)
 
-            alpha = 0.75
-            total_loss = (1-alpha)*loss_seg + tc_loss# + mse_loss + ch_loss
+            # pred2 = model_seg(im2)
+            # pred_smax2 = smax(pred2)
+            # pred_bin2 = torch.where(pred_smax2[:,0,:,:] > 0.5, 1, 0).unsqueeze(1).float().to(device)
+
+            # predw1 = backward_warp(pred_bin1,flow)
+            # bw1 = backward_warp(im1,flow)
+            # mw1 = backward_warp(mask1,flow)
+            # difference1 = im2 - bw1
+
+            # loss_seg = pixel_looser(pred1, mask_comb1)
+            # tc_loss = 1 - miou_loss(predw1, pred_bin2)
+            # mse_loss = F.mse_loss(bw1, im2)
+            # ch_loss = s_loss(flow)
+
+            # alpha = 0.75
+            # total_loss = (1-alpha)*loss_seg + tc_loss# + mse_loss + ch_loss
 
             total_loss.backward()
             g_optimizer_flow.step()
@@ -363,6 +394,6 @@ if __name__ == "__main__":
     try:
         backbone = sys.argv[1]
     except IndexError:
-        backbone = 'resnet34'
+        backbone = 'unetr'
 
     train(backbone=backbone)

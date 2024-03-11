@@ -96,7 +96,7 @@ def train(backbone):
 
     backbone_name = 'varghese_' + backbone
     
-    g_optimizer_flow = optim.Adam(model_flow.parameters(),1e-4)
+    g_optimizer_flow = optim.Adam(model_flow.parameters(),1e-5)
 
     if backbone == 'cnn3d':
         model_seg = CNN3D(1,2).to(device)
@@ -122,7 +122,7 @@ def train(backbone):
             num_classes=2,            # output channels (number of classes in your dataset)
         ).to(device)  
     
-    g_optimizer_seg = optim.Adam(model_seg.parameters(),1e-4)
+    g_optimizer_seg = optim.Adam(model_seg.parameters(),1e-5)
 
     num_iter = 401
 
@@ -201,7 +201,6 @@ def train(backbone):
 
             mask_comb1 = torch.cat((mask1,mask_data[:,0,1,:,:].unsqueeze(1)),1)
             mask_comb2 = torch.cat((mask2,mask_data[:,1,1,:,:].unsqueeze(1)),1)
-            
 
             flow = model_flow(im2,im1)
 
@@ -209,34 +208,34 @@ def train(backbone):
                 
                 im_concat = torch.cat((im1,im2),1)
                 im_concat = torch.permute(im_concat, (0, 2, 3, 1)).unsqueeze(1)
-                pred1 = model_seg(im_concat)
-            
+                pred_comb = model_seg(im_concat)
+                pred1 = pred_comb[:, :, 0, :, :]
+                pred2 = pred_comb[:, :, 1, :, :]
+
             else:
                 pred1 = model_seg(im1)
+                pred2 = model_seg(im2)
 
-            print(pred1.shape)
+            loss_seg1 = pixel_looser(pred1, mask_comb1)
+            loss_seg2 =  pixel_looser(pred2, mask_comb2)
 
+            pred_smax1 = smax(pred1)
+            pred_bin1 = torch.where(pred_smax1[:,0,:,:] > 0.5, 1, 0).unsqueeze(1).float().to(device)
 
-            total_loss = pixel_looser(pred1[:,:,0,:,:], mask_comb1) + pixel_looser(pred1[:,:,1,:,:], mask_comb2)
-            # pred_smax1 = smax(pred1)
-            # pred_bin1 = torch.where(pred_smax1[:,0,:,:] > 0.5, 1, 0).unsqueeze(1).float().to(device)
+            pred_smax2 = smax(pred2)
+            pred_bin2 = torch.where(pred_smax2[:,0,:,:] > 0.5, 1, 0).unsqueeze(1).float().to(device)
 
-            # pred2 = model_seg(im2)
-            # pred_smax2 = smax(pred2)
-            # pred_bin2 = torch.where(pred_smax2[:,0,:,:] > 0.5, 1, 0).unsqueeze(1).float().to(device)
+            predw1 = backward_warp(pred_bin1,flow)
+            bw1 = backward_warp(im1,flow)
+            mw1 = backward_warp(mask1,flow)
+            difference1 = im2 - bw1
 
-            # predw1 = backward_warp(pred_bin1,flow)
-            # bw1 = backward_warp(im1,flow)
-            # mw1 = backward_warp(mask1,flow)
-            # difference1 = im2 - bw1
+            tc_loss = 1 - miou_loss(predw1, pred_bin2)
+            mse_loss = F.mse_loss(bw1, im2)
+            ch_loss = s_loss(flow)
 
-            # loss_seg = pixel_looser(pred1, mask_comb1)
-            # tc_loss = 1 - miou_loss(predw1, pred_bin2)
-            # mse_loss = F.mse_loss(bw1, im2)
-            # ch_loss = s_loss(flow)
-
-            # alpha = 0.75
-            # total_loss = (1-alpha)*loss_seg + tc_loss# + mse_loss + ch_loss
+            alpha = 0.75
+            total_loss = loss_seg1 + loss_seg2#(1-alpha)*loss_seg1 + tc_loss# + mse_loss + ch_loss
 
             total_loss.backward()
             g_optimizer_flow.step()
@@ -271,7 +270,7 @@ def train(backbone):
         predw_plot = predw1[0].detach().cpu().numpy()
         pred_bin_plot = pred_bin1[0].detach().cpu().numpy()
 
-        diff_mw_plot = predw_plot - mask2_plot
+        diff_mw_plot = predw_plot - mask2_plot#-1 (pink) = FN, 0 = TP/TN (yellow), 1 (blue) = FP
         ax[0][0].imshow(im1_plot[0])
         ax[0][1].imshow(mask1_plot[0])
 
@@ -328,11 +327,24 @@ def train(backbone):
                 
                 flow = model_flow(im2,im1)
 
-                pred1 = model_seg(im1)
+                if backbone == 'unetr':
+                    
+                    im_concat = torch.cat((im1,im2),1)
+                    im_concat = torch.permute(im_concat, (0, 2, 3, 1)).unsqueeze(1)
+                    pred_comb = model_seg(im_concat)
+                    pred1 = pred_comb[:, :, 0, :, :]
+                    pred2 = pred_comb[:, :, 1, :, :]
+
+                else:
+                    pred1 = model_seg(im1)
+                    pred2 = model_seg(im2)
+
+                loss_seg1_val = pixel_looser(pred1, mask_comb1)
+                loss_seg2_val =  pixel_looser(pred2, mask_comb2)
+
                 pred_smax1 = smax(pred1)
                 pred_bin1 = torch.where(pred_smax1[:,0,:,:] > 0.5, 1, 0).unsqueeze(1).float().to(device)
 
-                pred2 = model_seg(im2)
                 pred_smax2 = smax(pred2)
                 pred_bin2 = torch.where(pred_smax2[:,0,:,:] > 0.5, 1, 0).unsqueeze(1).float().to(device)
 
@@ -341,13 +353,12 @@ def train(backbone):
                 mw1 = backward_warp(mask1,flow)
                 difference1 = im2 - bw1
 
-                loss_seg_val = pixel_looser(pred1, mask_comb1)
                 tc_loss_val = 1 - miou_loss(predw1, pred_bin2)
                 mse_loss_val = F.mse_loss(bw1, im2)
                 ch_loss_val = s_loss(flow)
                 alpha = 0.75
 
-                total_loss_val = (1-alpha)*loss_seg_val + tc_loss_val# + mse_loss_val + ch_loss_val
+                total_loss_val = loss_seg1 + loss_seg2#(1-alpha)*loss_seg1_val + tc_loss_val# + mse_loss_val + ch_loss_val
 
                 epoch_loss_val += total_loss_val.item()
 
@@ -396,4 +407,4 @@ if __name__ == "__main__":
     except IndexError:
         backbone = 'unetr'
 
-    train(backbone=backbone)
+    train(backbone='unetr')

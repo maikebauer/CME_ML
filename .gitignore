@@ -60,4 +60,5 @@ Model_Versions/
 Model_Train_Old/
 Model_Test/
 imgs/
+Rand/
 __pycache__/

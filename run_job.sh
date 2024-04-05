@@ -19,17 +19,19 @@ eval "$(conda shell.bash hook)"
 
 conda activate cme_ml
 
-mode="Train_Varghese" #Test #Train_Flow #Train_Varghese #Train
+mode="Train_3DConv_Prob" #Test #Train_Flow #Train_Varghese #Train
 
 declare -a epoch=(0 5 10 15 20 30 40 50 60 70 80 90 100 120 140 160 180 200 250 300 350 400) #0 5 10 15 20 30 40 50 60 70 80 90 100 120 140 160 180 200 250 300 350 400
 
 model_run="model_torch.py"
 model_flow="model_flow.py"
 model_varghese="model_varghese.py"
+model_3dconv="model_3dconv.py"
+model_3dconv_prob="model_3dconv_prob.py"
 eval_run="evaluation.py"
 eval_folder="run_22022024_133027_model_resnet34"
 
-backbone="resnet34"
+backbone="unetr"
 
 if [ "$mode" = "Train" ]
 then
@@ -40,6 +42,12 @@ then
 elif [ "$mode" = "Train_Varghese" ]
 then
     python "$model_varghese" "$backbone"
+elif [ "$mode" = "Train_3DConv" ]
+then
+    python "$model_3dconv" "$backbone"
+elif [ "$mode" = "Train_3DConv_Prob" ]
+then
+    python "$model_3dconv_prob" "$backbone"
 elif [ "$mode" = "Test" ]
 then
     for i in "${epoch[@]}"

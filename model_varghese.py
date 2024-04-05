@@ -1,74 +1,57 @@
 import torch
 from torch import nn,optim
 import torch.nn.functional as F
-import glob
-from torch.utils.data import Dataset
-from PIL import Image
-import cv2
-from pycocotools import coco
 import matplotlib.pyplot as plt 
 import numpy as np
-import time 
 from torchvision.transforms import v2
 import sys
-import evaluation
+from evaluation import evaluate_basic
 import os
-import csv
 from backbones_unet.model.unet import Unet
 from datetime import datetime
-from skimage.morphology import binary_dilation, disk
-from numpy.random import default_rng
 import matplotlib
-from model_flow import FNet, sep_noevent_data, FrondandDiff, backward_warp, charbonnier_loss, spatial_smoothing_loss
+from models import FNet
 from model_torch import CNN3D
 from matplotlib.colors import ListedColormap
-import evaluation
 import copy
-from unetr import UNETR
-
-def miou_loss(pred_im2, real_im2):
-    """
-    Differentiable mean IOU loss, as defined in Varghese 2021, equation 11.
-    """
-    
-    prod_im2 = pred_im2 * real_im2
-
-    sum_im2 = pred_im2 + real_im2
-
-    loss = torch.sum(torch.abs(prod_im2))/torch.sum(torch.abs(sum_im2 - prod_im2))
-
-    return loss
+from models import UNETR_2
+from losses import miou_loss, spatial_smoothing_loss
+from dataset import FlowSet
+from utils import backward_warp
 
 def train(backbone):
 
     device = torch.device("cpu")
 
-    batch_size = 4
-    num_workers = 2
-
+    batch_size = 1
+    num_workers = 1
+    width_par = 128
     aug = True
 
     if(torch.backends.mps.is_available()):
         device = torch.device("mps")
         matplotlib.use('Qt5Agg')
-        width_par = 128
-        os.system("export PYTORCH_ENABLE_MPS_FALLBACK=1")
 
     elif(torch.cuda.is_available()):
-        device = torch.device("cuda:1")
-        batch_size = 1
-        num_workers = 1
-        width_par = 128
+        if os.path.isdir('/home/mbauer/Data/'):
+            device = torch.device("cuda:1")
+        elif os.path.isdir('/gpfs/data/fs72241/maibauer/'):
+            device = torch.device("cuda")
+            batch_size = 8
+            num_workers = 4
+            width_par = 512
+        else:
+            sys.exit("Invalid data path. Exiting...")    
     
-    composed = v2.Compose([v2.ToPILImage(), v2.RandomHorizontalFlip(p=0.5), v2.RandomRotation((0, 360)), v2.RandomVerticalFlip(p=0.5)])
+    composed = v2.Compose([v2.ToPILImage(), v2.RandomHorizontalFlip(p=0.5), v2.RandomVerticalFlip(p=0.5)]) #v2.RandomRotation((0, 360))
     
     if aug == True:
-        dataset = FrondandDiff(transform=composed)
-        dataset_val = FrondandDiff()
+        dataset = FlowSet(transform=composed)
+        dataset_val = FlowSet()
 
     else:
-        dataset = FrondandDiff()
-        dataset_val = FrondandDiff()
+        dataset = FlowSet()
+        dataset_val = FlowSet()
 
     indices = dataset.train_paired_idx
     indices_val = dataset.val_paired_idx
@@ -79,7 +62,7 @@ def train(backbone):
     data_loader = torch.utils.data.DataLoader(
                                                 dataset_sub,
                                                 batch_size=batch_size,
-                                                shuffle=True,
+                                                shuffle=False,
                                                 num_workers=num_workers,
                                                 pin_memory=False
                                             )
@@ -87,7 +70,7 @@ def train(backbone):
     data_loader_val = torch.utils.data.DataLoader(
                                                 dataset_sub_val,
                                                 batch_size=batch_size,
-                                                shuffle=True,
+                                                shuffle=False,
                                                 num_workers=num_workers,
                                                 pin_memory=False
                                             )
@@ -102,7 +85,7 @@ def train(backbone):
         model_seg = CNN3D(1,2).to(device)
 
     elif backbone == 'unetr':
-        model_seg = UNETR(in_channels=1,
+        model_seg = UNETR_2(in_channels=1,
         out_channels=2,
         img_size=(width_par, width_par, 2),
         feature_size=16,
@@ -207,6 +190,7 @@ def train(backbone):
             if backbone == 'unetr':
                 
                 im_concat = torch.cat((im1,im2),1)
+
                 im_concat = torch.permute(im_concat, (0, 2, 3, 1)).unsqueeze(1)
                 pred_comb = model_seg(im_concat)
                 pred1 = pred_comb[:, :, 0, :, :]
@@ -234,8 +218,8 @@ def train(backbone):
             mse_loss = F.mse_loss(bw1, im2)
             ch_loss = s_loss(flow)
 
-            alpha = 0.75
-            total_loss = loss_seg1 + loss_seg2#(1-alpha)*loss_seg1 + tc_loss# + mse_loss + ch_loss
+            alpha = 0
+            total_loss = (1-alpha)*loss_seg1 + tc_loss#loss_seg1 + loss_seg2# + mse_loss + ch_loss
 
             total_loss.backward()
             g_optimizer_flow.step()
@@ -356,16 +340,16 @@ def train(backbone):
                 tc_loss_val = 1 - miou_loss(predw1, pred_bin2)
                 mse_loss_val = F.mse_loss(bw1, im2)
                 ch_loss_val = s_loss(flow)
-                alpha = 0.75
+                alpha = 0
 
-                total_loss_val = loss_seg1 + loss_seg2#(1-alpha)*loss_seg1_val + tc_loss_val# + mse_loss_val + ch_loss_val
+                total_loss_val = (1-alpha)*loss_seg1_val + tc_loss_val#loss_seg1_val + loss_seg2_val# + mse_loss_val + ch_loss_val
 
                 epoch_loss_val += total_loss_val.item()
 
-                metrics1 = evaluation.evaluate(pred1.cpu().detach(),mask_comb1.cpu().detach().numpy(),im1.cpu().detach().numpy(), model_name, folder_path, num)
+                metrics1 = evaluate_basic(pred1.cpu().detach(),mask_comb1.cpu().detach().numpy(),im1.cpu().detach().numpy(), model_name, folder_path, num)
                 save_metrics.append(metrics1)
 
-                metrics2 = evaluation.evaluate(pred2.cpu().detach(),mask_comb2.cpu().detach().numpy(),im2.cpu().detach().numpy(), model_name, folder_path, num)
+                metrics2 = evaluate_basic(pred2.cpu().detach(),mask_comb2.cpu().detach().numpy(),im2.cpu().detach().numpy(), model_name, folder_path, num)
                 save_metrics.append(metrics2)
 
             epoch_loss_val = epoch_loss_val/(num+1)
@@ -407,4 +391,4 @@ if __name__ == "__main__":
     except IndexError:
         backbone = 'unetr'
 
-    train(backbone='unetr')
+    train(backbone=backbone)

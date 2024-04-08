@@ -22,7 +22,7 @@ def train(backbone):
     width_par = 128
     aug = True
     win_size = 16
-    stride = int(win_size-2)
+    stride = int(win_size/8)
 
     if(torch.backends.mps.is_available()):
         device = torch.device("mps")

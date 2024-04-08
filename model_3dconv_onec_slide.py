@@ -22,7 +22,7 @@ def train(backbone):
     width_par = 128
     aug = True
     win_size = 16
-    stride = int(win_size/8)
+    stride = int(win_size-2)
 
     if(torch.backends.mps.is_available()):
         device = torch.device("mps")
@@ -286,7 +286,7 @@ def train(backbone):
                 loss_seg_val = pixel_looser(pred_comb, mask_data)
 
                 
-                for b in range(batch_size):
+                for b in range(mask_data.shape[0]):
                     for k in range(win_size):
                         current_ind = indices_val[num_batch][k]-min(indices_val.flatten())
                         pred_save[current_ind].append(pred_comb[b,0,k,:,:])

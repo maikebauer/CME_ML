@@ -175,10 +175,10 @@ class RundifSequence(Dataset):
             dilation = True
 
             if dilation:
-                k_size = int(width_par/64)
+                k_size = 2
                 kernel = ndimage.generate_binary_structure(k_size, k_size)
                 sigma = 5
-                n_it = 2
+                n_it = int(width_par/64)
 
                 GT = ndimage.binary_dilation(GT, structure=kernel,iterations=n_it)
                 GT = ndimage.gaussian_filter(GT.astype(np.float32), sigma=sigma)

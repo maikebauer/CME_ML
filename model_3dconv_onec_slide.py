@@ -34,8 +34,8 @@ def train(backbone):
             matplotlib.use('Qt5Agg')
         elif os.path.isdir('/gpfs/data/fs72241/maibauer/'):
             device = torch.device("cuda")
-            batch_size = 8
-            num_workers = 4
+            batch_size = 4
+            num_workers = 2
             width_par = 512
         else:
             sys.exit("Invalid data path. Exiting...")    
@@ -406,4 +406,9 @@ def train(backbone):
             scheduler.step(epoch_loss_val)
 
 if __name__ == "__main__":
-    train(backbone='cnn3d')
+    try:
+        backbone = sys.argv[1]
+    except IndexError:
+        backbone = 'cnn3d'
+
+    train(backbone=backbone)

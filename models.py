@@ -1,9 +1,9 @@
 
 from typing import Tuple, Union
-
+import numpy as np
 import torch
 import torch.nn as nn
-
+import matplotlib.pyplot as plt
 from monai.networks.blocks import UnetrBasicBlock, UnetrPrUpBlock, UnetrUpBlock
 from monai.networks.blocks.dynunet_block import UnetOutBlock
 from monai.networks.nets import ViT
@@ -294,7 +294,9 @@ class CNN3D(nn.Module):
     def forward(self, input_img):
         # Encoder Stage - 1
         dim_0 = input_img.size()
+
         x_00 = F.relu(self.encoder_conv_00(input_img))
+
         x_01 = F.relu(self.encoder_conv_01(x_00))
         x_0, indices_0 = F.max_pool3d(x_01, kernel_size=2, stride=2, return_indices=True)
         # Encoder Stage - 2
@@ -362,7 +364,6 @@ class CNN3D(nn.Module):
 
         x_01d = F.relu(self.decoder_convtr_01(x_0d))
         x_00d = self.decoder_convtr_00(x_01d)
-
 
         return self.sigmoid(x_00d)
 

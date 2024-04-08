@@ -17,7 +17,7 @@ def train(backbone):
 
     device = torch.device("cpu")
 
-    batch_size = 1
+    batch_size = 2
     num_workers = 1
     width_par = 128
     aug = True
@@ -100,7 +100,7 @@ def train(backbone):
         print('Invalid backbone...')
         sys.exit()
 
-    g_optimizer_seg = optim.Adam(model_seg.parameters(),1e-4)
+    g_optimizer_seg = optim.Adam(model_seg.parameters(),1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(g_optimizer_seg, 'min', patience=3)
     #scheduler = optim.lr_scheduler.StepLR(g_optimizer_seg, step_size=10, gamma=0.1)
     num_iter = 101
@@ -157,14 +157,15 @@ def train(backbone):
     num_no_improvement = 0
 
     for epoch in range(num_iter):
+        model_seg.train()
+
         epoch_loss = 0
         epoch_loss_val = 0
 
         model_name = "model_epoch_{}".format(epoch)
         save_metrics = []
 
-        model_seg.train()
-
+        batch_loss = 0
         for num, data in enumerate(data_loader):
             g_optimizer_seg.zero_grad()
             #input_data = normalize_train(data['image']).float().to(device)
@@ -185,22 +186,17 @@ def train(backbone):
             else:
                 print('Invalid backbone...')
                 sys.exit()
-
-            batch_loss = 0
-
-            for k in range(win_size):
                 
-                loss_seg = pixel_looser(pred_comb[:,0,k,:,:], mask_data[:,0,k,:,:])
+            loss_seg = pixel_looser(pred_comb, mask_data)
+            #batch_loss = batch_loss + loss_seg.item()
 
-                batch_loss = batch_loss + loss_seg
-    
-            batch_loss.backward()
+            loss_seg.backward()
 
             g_optimizer_seg.step()
+            batch_loss = batch_loss + loss_seg.item()
+            #print('batch_loss: ', batch_loss)
 
-            epoch_loss = epoch_loss + batch_loss.item()
-
-        epoch_loss = epoch_loss/(num+1)
+        epoch_loss = batch_loss/(num+1)
 
         optimizer_data.append([epoch, epoch_loss])
 
@@ -261,7 +257,9 @@ def train(backbone):
 
             for val in range(n_val):
                 pred_save.append([])
-
+            
+            batch_loss_val = 0
+            num_batch = 0
             for num, data in enumerate(data_loader_val):
 
                 #input_data = normalize_val(data['image']).float().to(device)
@@ -285,23 +283,23 @@ def train(backbone):
                     print('Invalid backbone...')
                     sys.exit()
 
-                batch_loss_val = 0
+                loss_seg_val = pixel_looser(pred_comb, mask_data)
+
                 
-                for k in range(win_size):
-                    current_ind = indices_val[num][k]-min(indices_val.flatten())
-                    
-                    pred_save[current_ind].append(pred_comb[:,0,k,:,:])
+                for b in range(batch_size):
+                    for k in range(win_size):
+                        current_ind = indices_val[num_batch][k]-min(indices_val.flatten())
+                        pred_save[current_ind].append(pred_comb[b,0,k,:,:])
 
-                    if np.all(input_imgs[current_ind]) == 0:
-                        input_imgs[current_ind] = input_data[:,0,k,:,:].cpu().detach().numpy()
-                        input_masks[current_ind] = mask_data[:,0,k,:,:].cpu().detach().numpy()
+                        if np.all(input_imgs[current_ind]) == 0:
+                            input_imgs[current_ind] = input_data[b,0,k,:,:].cpu().detach().numpy()
+                            input_masks[current_ind] = mask_data[b,0,k,:,:].cpu().detach().numpy()
 
-                    loss_seg_val = pixel_looser(pred_comb[:,0,k,:,:], mask_data[:,0,k,:,:])
-                    batch_loss_val = batch_loss_val + loss_seg_val
+                    num_batch = num_batch + 1
 
-                epoch_loss_val = epoch_loss_val + batch_loss_val.item()
-
-            epoch_loss_val = epoch_loss_val/(num+1)
+                batch_loss_val = batch_loss_val + loss_seg_val.item()
+            
+            epoch_loss_val = batch_loss_val/(num+1)
             
             optimizer_data_val.append([epoch, epoch_loss_val])
 
@@ -331,6 +329,7 @@ def train(backbone):
                     ax[w+win_size*b][3].imshow(np.where(bin_pred > thresh, 1, 0)) #pred
                     ax[w+win_size*b][4].plot(*zip(*optimizer_data), color='blue') #loss
                     ax[w+win_size*b][4].plot(*zip(*optimizer_data_val), color='orange') #loss
+                    ax[w+win_size*b][4].set_yscale('log')
 
                     ax[w+win_size*b][0].axis("off")
                     ax[w+win_size*b][1].axis("off")
@@ -374,7 +373,7 @@ def train(backbone):
                 #pred_save[h] = np.where(pred_save[h] > 1, 1, pred_save[h])
 
             pred_save = np.array(pred_save)
-            pred_save = torch.Tensor(pred_save[:,0,:,:])
+            pred_save = torch.Tensor(pred_save)
             input_imgs = torch.Tensor(input_imgs)
             input_masks = torch.Tensor(input_masks)
 
@@ -402,8 +401,8 @@ def train(backbone):
 
             np.save(metrics_path+'metrics.npy', epoch_metrics)
 
-            print(f"Epoch: {epoch:.0f}, Loss: {epoch_loss:.5f}, Val Loss: {epoch_loss_val:.4f}, No improvement in {num_no_improvement:.0f} epochs.")
-            scheduler.step(epoch_loss_val)
+            print(f"Epoch: {epoch:.0f}, Loss: {epoch_loss:.10f}, Val Loss: {epoch_loss_val:.10f}, No improvement in {num_no_improvement:.0f} epochs.")
+            #scheduler.step(epoch_loss_val)
 
 if __name__ == "__main__":
     try:

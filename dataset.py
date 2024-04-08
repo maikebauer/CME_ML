@@ -175,7 +175,8 @@ class RundifSequence(Dataset):
             dilation = True
 
             if dilation:
-                kernel = ndimage.generate_binary_structure(2, 2)
+                k_size = int(width_par/64)
+                kernel = ndimage.generate_binary_structure(k_size, k_size)
                 sigma = 5
                 n_it = 2
 

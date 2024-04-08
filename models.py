@@ -364,7 +364,7 @@ class CNN3D(nn.Module):
         x_00d = self.decoder_convtr_00(x_01d)
 
 
-        return x_00d
+        return self.sigmoid(x_00d)
 
 class FNet(nn.Module):
     """ Optical flow estimation network

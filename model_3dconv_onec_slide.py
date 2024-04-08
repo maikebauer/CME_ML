@@ -8,7 +8,7 @@ import sys
 import os
 from datetime import datetime
 import copy
-from models import UNETR_16
+from models import UNETR_16, CNN3D
 from dataset import RundifSequence
 import matplotlib
 from evaluation import evaluate_onec_slide
@@ -93,6 +93,9 @@ def train(backbone):
         res_block=True,
         dropout_rate=0.0).to(device)
 
+    elif backbone == 'cnn3d': 
+        model_seg = CNN3D(input_channels=1, output_channels=1).to(device)
+
     else:
         print('Invalid backbone...')
         sys.exit()
@@ -136,7 +139,11 @@ def train(backbone):
     weights[1] = 1.0
 
     weights = torch.tensor(weights).to(device, dtype=torch.float32)
-    pixel_looser = nn.BCEWithLogitsLoss(pos_weight=weights[1])
+
+    if backbone == 'unetr':
+        pixel_looser = nn.BCEWithLogitsLoss(pos_weight=weights[1])
+    elif backbone == 'cnn3d':
+        pixel_looser = nn.BCELoss()
     
     os.makedirs(os.path.dirname(train_path), exist_ok=True)
     os.makedirs(os.path.dirname(im_path), exist_ok=True)
@@ -170,6 +177,11 @@ def train(backbone):
                 pred_comb = model_seg(im_concat)
                 mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
 
+            elif backbone == 'cnn3d':
+                input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
+                mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
+                pred_comb = model_seg(input_data)
+
             else:
                 print('Invalid backbone...')
                 sys.exit()
@@ -181,9 +193,6 @@ def train(backbone):
                 loss_seg = pixel_looser(pred_comb[:,0,k,:,:], mask_data[:,0,k,:,:])
 
                 batch_loss = batch_loss + loss_seg
-            
-
-
     
             batch_loss.backward()
 
@@ -209,7 +218,10 @@ def train(backbone):
             for w in range(win_size):
                 ax[w+win_size*b][0].imshow(data['image'][b][w][0].detach().cpu().numpy()) #image
                 ax[w+win_size*b][1].imshow(mask_data[b][0][w].detach().cpu().numpy()) #mask
-                ax[w+win_size*b][2].imshow(sigmoid(pred_comb[b,0,w,:,:]).detach().cpu().numpy()) #pred
+                if backbone == 'unetr':
+                    ax[w+win_size*b][2].imshow(sigmoid(pred_comb[b,0,w,:,:]).detach().cpu().numpy()) #pred
+                elif backbone == 'cnn3d':
+                    ax[w+win_size*b][2].imshow(pred_comb[b,0,w,:,:].detach().cpu().numpy())
                 ax[w+win_size*b][3].plot(*zip(*optimizer_data)) #loss
 
                 ax[w+win_size*b][0].axis("off")
@@ -261,6 +273,12 @@ def train(backbone):
                     im_concat = torch.permute(input_data, (0, 2, 3, 4, 1))
                     pred_comb = model_seg(im_concat)
                     mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
+                    input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
+
+                elif backbone == 'cnn3d':
+                    input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
+                    mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
+                    pred_comb = model_seg(input_data)
 
                 else:
 
@@ -268,8 +286,7 @@ def train(backbone):
                     sys.exit()
 
                 batch_loss_val = 0
-                input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
-
+                
                 for k in range(win_size):
                     current_ind = indices_val[num][k]-min(indices_val.flatten())
                     
@@ -302,8 +319,11 @@ def train(backbone):
             
             for b in range(np.shape(mask_data)[0]):
                 for w in range(win_size):
-
-                    bin_pred = sigmoid(pred_comb[b,0,w,:,:]).detach().cpu().numpy()
+                    
+                    if backbone == 'unetr':
+                        bin_pred = sigmoid(pred_comb[b,0,w,:,:]).detach().cpu().numpy()
+                    elif backbone == 'cnn3d':
+                        bin_pred = pred_comb[b,0,w,:,:].detach().cpu().numpy()
 
                     ax[w+win_size*b][0].imshow(data['image'][b][w][0].detach().cpu().numpy()) #image
                     ax[w+win_size*b][1].imshow(mask_data[b][0][w].detach().cpu().numpy()) #mask
@@ -344,7 +364,10 @@ def train(backbone):
             input_imgs = np.array(input_imgs)
             for h, pred_arr in enumerate(pred_save):
                 for j in range(len(pred_arr)):
-                    pred_arr[j] = sigmoid(pred_arr[j].cpu().detach())*(j+1)/len(pred_arr)
+                    if backbone == 'unetr':
+                        pred_arr[j] = sigmoid(pred_arr[j].cpu().detach())*(j+1)/len(pred_arr)
+                    elif backbone == 'cnn3d':
+                        pred_arr[j] = pred_arr[j].cpu().detach()*(j+1)/len(pred_arr)
                 
                 pred_save[h] = np.nanmean(pred_arr,axis=0)
                 #pred_save[h] = np.nansum(pred_arr,axis=0)
@@ -383,9 +406,4 @@ def train(backbone):
             scheduler.step(epoch_loss_val)
 
 if __name__ == "__main__":
-    try:
-        backbone = sys.argv[1]
-    except IndexError:
-        backbone = 'unetr'
-
-    train(backbone='unetr')
+    train(backbone='cnn3d')

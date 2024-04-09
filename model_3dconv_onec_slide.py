@@ -32,11 +32,17 @@ def train(backbone):
         if os.path.isdir('/home/mbauer/Data/'):
             device = torch.device("cuda:1")
             matplotlib.use('Qt5Agg')
+
         elif os.path.isdir('/gpfs/data/fs72241/maibauer/'):
             device = torch.device("cuda")
             batch_size = 4
             num_workers = 2
             width_par = 512
+
+            if(torch.cuda.device_count() >1):
+                batch_size = 8
+                num_workers = 4
+
         else:
             sys.exit("Invalid data path. Exiting...")    
     
@@ -91,14 +97,19 @@ def train(backbone):
         norm_name='instance',
         conv_block=True,
         res_block=True,
-        dropout_rate=0.0).to(device)
+        dropout_rate=0.0)
 
     elif backbone == 'cnn3d': 
-        model_seg = CNN3D(input_channels=1, output_channels=1).to(device)
+        model_seg = CNN3D(input_channels=1, output_channels=1)
 
     else:
         print('Invalid backbone...')
         sys.exit()
+
+    if(torch.cuda.device_count() >1) & os.path.isdir('/gpfs/data/fs72241/maibauer/'):
+        model_seg = torch.nn.DataParallel(model_seg)
+
+    model_seg.to(device)
 
     g_optimizer_seg = optim.Adam(model_seg.parameters(),1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(g_optimizer_seg, 'min', patience=3)
@@ -402,7 +413,7 @@ def train(backbone):
             np.save(metrics_path+'metrics.npy', epoch_metrics)
 
             print(f"Epoch: {epoch:.0f}, Loss: {epoch_loss:.10f}, Val Loss: {epoch_loss_val:.10f}, No improvement in {num_no_improvement:.0f} epochs.")
-            #scheduler.step(epoch_loss_val)
+            scheduler.step(epoch_loss_val)
 
 if __name__ == "__main__":
     try:

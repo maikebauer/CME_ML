@@ -394,7 +394,12 @@ def train(backbone):
 
             if epoch_loss_val < best_loss:
                 best_loss = epoch_loss_val
-                best_model_seg = copy.deepcopy(model_seg.state_dict())
+
+                if(torch.cuda.device_count() >1) & os.path.isdir('/gpfs/data/fs72241/maibauer/'):
+                    best_model_seg = copy.deepcopy(model_seg.module.state_dict())
+                else:
+                    best_model_seg = copy.deepcopy(model_seg.state_dict())
+
                 best_weights_seg = copy.deepcopy(g_optimizer_seg.state_dict())
                 num_no_improvement = 0
 

@@ -120,11 +120,13 @@ class RundifSequence(Dataset):
         im_all = []
         
         item_ids = self.img_ids_win[index]
+        file_names = []
 
         for idx in item_ids:
             
             img_info = self.coco_obj.loadImgs([idx])[0]
             img_file_name = img_info["file_name"].split('/')[-1]
+            file_names.append(img_file_name)
 
             if torch.cuda.is_available():
                 
@@ -198,7 +200,7 @@ class RundifSequence(Dataset):
         GT_all = np.array(GT_all)
         im_all = np.array(im_all)
 
-        return {'image':torch.tensor(im_all), 'gt':torch.tensor(GT_all)}
+        return {'image':torch.tensor(im_all), 'gt':torch.tensor(GT_all), 'names':file_names}
     
     def __len__(self):
         return len(self.img_ids_win)

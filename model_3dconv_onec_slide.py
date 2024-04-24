@@ -30,8 +30,12 @@ def train(backbone):
 
     elif(torch.cuda.is_available()):
         if os.path.isdir('/home/mbauer/Data/'):
-            device = torch.device("cuda:1")
-            matplotlib.use('Qt5Agg')
+            device = torch.device("cuda")
+            #matplotlib.use('Qt5Agg')
+
+            if(torch.cuda.device_count() >1):
+                batch_size = 4
+                num_workers = 2
 
         elif os.path.isdir('/gpfs/data/fs72241/maibauer/'):
             device = torch.device("cuda")
@@ -106,9 +110,9 @@ def train(backbone):
         print('Invalid backbone...')
         sys.exit()
 
-    if(torch.cuda.device_count() >1) & os.path.isdir('/gpfs/data/fs72241/maibauer/'):
+    if(torch.cuda.device_count() >1):
         model_seg = torch.nn.DataParallel(model_seg)
-
+    
     model_seg.to(device)
 
     g_optimizer_seg = optim.Adam(model_seg.parameters(),1e-5)
@@ -375,12 +379,12 @@ def train(backbone):
             for h, pred_arr in enumerate(pred_save):
                 for j in range(len(pred_arr)):
                     if backbone == 'unetr':
-                        pred_arr[j] = sigmoid(pred_arr[j].cpu().detach())*(j+1)/len(pred_arr)
+                        pred_arr[j] = sigmoid(pred_arr[j].cpu().detach())#*(j+1)/len(pred_arr)
                     elif backbone == 'cnn3d':
-                        pred_arr[j] = pred_arr[j].cpu().detach()*(j+1)/len(pred_arr)
+                        pred_arr[j] = pred_arr[j].cpu().detach()#*(j+1)/len(pred_arr)
                 
                 pred_save[h] = np.nanmean(pred_arr,axis=0)
-                #pred_save[h] = np.nansum(pred_arr,axis=0)
+                #pred_save[h] = np.nanmax(pred_arr,axis=0)
                 #pred_save[h] = np.where(pred_save[h] > 1, 1, pred_save[h])
 
             pred_save = np.array(pred_save)
@@ -395,7 +399,7 @@ def train(backbone):
             if epoch_loss_val < best_loss:
                 best_loss = epoch_loss_val
 
-                if(torch.cuda.device_count() >1) & os.path.isdir('/gpfs/data/fs72241/maibauer/'):
+                if(torch.cuda.device_count() >1):
                     best_model_seg = copy.deepcopy(model_seg.module.state_dict())
                 else:
                     best_model_seg = copy.deepcopy(model_seg.state_dict())

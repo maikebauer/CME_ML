@@ -11,7 +11,7 @@ import copy
 from models import UNETR_16, CNN3D
 from dataset import RundifSequence
 import matplotlib
-from evaluation import evaluate_onec_slide
+from evaluation import evaluate_onec_slide, test_onec_slide
 
 def train(backbone):
 
@@ -424,10 +424,173 @@ def train(backbone):
             print(f"Epoch: {epoch:.0f}, Loss: {epoch_loss:.10f}, Val Loss: {epoch_loss_val:.10f}, No improvement in {num_no_improvement:.0f} epochs.")
             scheduler.step(epoch_loss_val)
 
+def test(model_name):
+
+    device = torch.device("cpu")
+
+    model_path = 'Model_Train/'+ model_name + '/model_seg.pth'
+    weights_path = 'Model_Train/'+ model_name + '/model_weights_seg.pth'
+
+    batch_size = 2
+    num_workers = 1
+    width_par = 128
+    aug = True
+    win_size = 16
+    stride = int(win_size/8)
+
+    if(torch.backends.mps.is_available()):
+        device = torch.device("mps")
+        #matplotlib.use('Qt5Agg')
+
+    elif(torch.cuda.is_available()):
+        if os.path.isdir('/home/mbauer/Data/'):
+            device = torch.device("cuda")
+            #matplotlib.use('Qt5Agg')
+
+            if(torch.cuda.device_count() >1):
+                batch_size = 4
+                num_workers = 2
+
+        elif os.path.isdir('/gpfs/data/fs72241/maibauer/'):
+            device = torch.device("cuda")
+            batch_size = 4
+            num_workers = 2
+            width_par = 512
+
+            if(torch.cuda.device_count() >1):
+                batch_size = 8
+                num_workers = 4
+
+        else:
+            sys.exit("Invalid data path. Exiting...")    
+
+    
+    sigmoid = nn.Sigmoid()
+
+    backbone = model_name.split('_')[-1]
+
+    if backbone == 'unetr':
+        model_seg = UNETR_16(in_channels=1,
+        out_channels=1,
+        img_size=(width_par, width_par, win_size),
+        feature_size=32,
+        hidden_size=768,
+        mlp_dim=3072,
+        num_heads=12,
+        pos_embed='perceptron',
+        norm_name='instance',
+        conv_block=True,
+        res_block=True,
+        dropout_rate=0.0)
+
+    elif backbone == 'cnn3d': 
+        model_seg = CNN3D(input_channels=1, output_channels=1)
+
+    model_seg.load_state_dict(torch.load(model_path, map_location=device))
+    model_seg.to(device)
+
+    composed = v2.Compose([v2.ToTensor()])
+
+    dataset = RundifSequence(transform=composed,mode='test',win_size=win_size,stride=stride)
+
+    data_loader = torch.utils.data.DataLoader(
+                                                dataset,
+                                                batch_size=batch_size,
+                                                shuffle=False,
+                                                num_workers=num_workers,
+                                                pin_memory=False
+                                            )    
+
+    indices_test = dataset.test_paired_idx
+
+    num_batch = 0
+    pred_save = []
+
+    n_val = (max(indices_test.flatten())-min(indices_test.flatten()))+1
+
+    input_imgs = np.zeros((n_val, width_par, width_par))
+    input_masks = np.zeros((n_val, width_par, width_par))
+
+    for val in range(n_val):
+        pred_save.append([])
+
+    model_seg.eval()
+
+    with torch.no_grad():
+        for num, data in enumerate(data_loader):
+
+            input_data = data['image'].float().to(device)
+            mask_data = data['gt'].float().to(device)
+
+            if backbone == 'unetr':
+                im_concat = torch.permute(input_data, (0, 2, 3, 4, 1))
+                pred_comb = model_seg(im_concat)
+                mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
+
+            elif backbone == 'cnn3d':
+                input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
+                mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
+                pred_comb = model_seg(input_data)
+
+            else:
+                print('Invalid backbone...')
+                sys.exit()
+
+
+            for b in range(mask_data.shape[0]):
+                for k in range(win_size):
+                    current_ind = indices_test[num_batch][k]-min(indices_test.flatten())
+                    pred_save[current_ind].append(pred_comb[b,0,k,:,:].cpu().detach().numpy())
+
+                    if np.all(input_imgs[current_ind]) == 0:
+                        input_imgs[current_ind] = input_data[b,0,k,:,:].cpu().detach().numpy()
+                        input_masks[current_ind] = mask_data[b,0,k,:,:].cpu().detach().numpy()
+
+                num_batch = num_batch + 1
+
+    input_imgs = np.array(input_imgs)
+
+    for h, pred_arr in enumerate(pred_save):
+        for j in range(len(pred_arr)):
+            if backbone == 'unetr':
+                pred_arr[j] = sigmoid(pred_arr[j])
+            elif backbone == 'cnn3d':
+                pred_arr[j] = pred_arr[j]
+
+    pred_final = np.zeros((n_val, width_par, width_par))
+
+    for h, pred_arr in enumerate(pred_save):
+        pred_prep = np.zeros((len(pred_arr), width_par, width_par))
+        for j in range(len(pred_arr)):
+            pred_prep[j] = pred_arr[j]
+
+        pred_final[h] = np.nanmean(pred_prep, axis=0)
+    
+    thresh = 0.1
+    metrics = test_onec_slide(pred_final,input_masks,input_imgs, model_name+'/', thresh=thresh)
+
+    metrics_path = 'Model_Test/' + model_name+ '/'
+
+    if not os.path.exists(metrics_path): 
+        os.makedirs(metrics_path, exist_ok=True) 
+
+    np.save(metrics_path+'metrics.npy', metrics)
+    print(metrics)
+
 if __name__ == "__main__":
     try:
         backbone = sys.argv[1]
     except IndexError:
         backbone = 'cnn3d'
 
-    train(backbone=backbone)
+    try:
+        mode = sys.argv[2]
+    except IndexError:
+        mode = 'train'
+
+    if mode == 'train':
+        train(backbone=backbone)
+    
+    elif mode == 'test':
+        model_name = sys.argv[3]
+        test(model_name=model_name)

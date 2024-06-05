@@ -25,8 +25,7 @@ class RundifSequence(Dataset):
 
         self.coco_obj = coco.COCO("instances_clahe.json")
         
-
-        self.img_ids = self.coco_obj.getImgIds()[:5140]###until last image annotated
+        self.img_ids = self.coco_obj.getImgIds()
 
         self.annotated = []
         self.events = []
@@ -214,8 +213,7 @@ class FlowSet(Dataset):
 
         self.coco_obj = coco.COCO("instances_clahe.json")
         
-
-        self.img_ids = self.coco_obj.getImgIds()[:5140]###until last image annotated
+        self.img_ids = self.coco_obj.getImgIds()
 
         self.annotated = []
         self.events = []
@@ -485,8 +483,7 @@ class BasicSet(Dataset):
 
         self.coco_obj = coco.COCO("instances_clahe.json")
         
-
-        self.img_ids = self.coco_obj.getImgIds()[:5140]###until last image annotated
+        self.img_ids = self.coco_obj.getImgIds()
 
         self.annotated = []
         self.events = []

@@ -50,9 +50,8 @@ def train(backbone):
         else:
             sys.exit("Invalid data path. Exiting...")    
     
-    # composed = v2.Compose([v2.ToPILImage(), v2.RandomHorizontalFlip(p=0.5), v2.RandomVerticalFlip(p=0.5)]) # v2.RandomRotation((0, 360))
     if aug == True:
-        composed = v2.Compose([v2.ToTensor(), v2.RandomHorizontalFlip(p=0.5), v2.RandomVerticalFlip(p=0.5)])
+        composed = v2.Compose([v2.ToTensor(), v2.RandomHorizontalFlip(p=0.5), v2.RandomVerticalFlip(p=0.5), v2.RandomAutocontrast(p=0.25), v2.RandomEqualize(p=0.25), v2.RandomPhotometricDistort(p=0.25)])
         composed_val = v2.Compose([v2.ToTensor()])
     else:
         composed = v2.Compose([v2.ToTensor()])

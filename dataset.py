@@ -25,7 +25,7 @@ class RundifSequence(Dataset):
 
         self.coco_obj = coco.COCO("instances_clahe.json")
         
-        self.img_ids = self.coco_obj.getImgIds()[:7441]
+        self.img_ids = self.coco_obj.getImgIds()[:7484]
 
         self.annotated = []
         self.events = []

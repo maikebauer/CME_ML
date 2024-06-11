@@ -434,7 +434,7 @@ def test(model_name):
     num_workers = 1
     width_par = 128
     aug = True
-    win_size = 16
+    win_size = 32
     stride = int(win_size/8)
 
     if(torch.backends.mps.is_available()):
@@ -454,7 +454,7 @@ def test(model_name):
             device = torch.device("cuda")
             batch_size = 4
             num_workers = 2
-            width_par = 512
+            width_par = 128
 
             if(torch.cuda.device_count() >1):
                 batch_size = 8

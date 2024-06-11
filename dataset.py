@@ -16,12 +16,13 @@ from scipy import ndimage
 from utils import sep_noevent_data
 
 class RundifSequence(Dataset):
-    def __init__(self, transform=None, mode='train', win_size=16, stride=4):
+    def __init__(self, transform=None, mode='train', win_size=16, stride=4,width_par=128):
         
         rng = default_rng()
 
         self.transform = transform
         self.mode = mode
+        self.width_par = width_par
 
         self.coco_obj = coco.COCO("instances_clahe.json")
         
@@ -54,7 +55,6 @@ class RundifSequence(Dataset):
                     temp_list = []
          
                 a_id_prev = self.img_ids[a]
-
         
         self.events = event_list
 
@@ -131,11 +131,9 @@ class RundifSequence(Dataset):
                 
                 if os.path.isdir('/home/mbauer/Data/'):
                     path = "/home/mbauer/Data/differences_clahe/"
-                    width_par = 128
                 
                 elif os.path.isdir('/gpfs/data/fs72241/maibauer/'):
                     path = "/gpfs/data/fs72241/maibauer/differences_clahe/"
-                    width_par = 512
 
                 else:
                     raise FileNotFoundError('No folder with differences found. Please check path.')
@@ -143,16 +141,15 @@ class RundifSequence(Dataset):
 
             else:
                 path = "/Volumes/SSD/differences_clahe/"
-                width_par = 128
 
-            height_par = width_par
+            height_par = self.width_par
 
             # Use URL to load image.
 
             im = Image.open(path+img_file_name).convert("L")
 
-            if width_par != 1024:
-                im = im.resize((width_par , height_par))
+            if self.width_par != 1024:
+                im = im.resize((self.width_par , height_par))
 
             GT = []
             annotations = self.coco_obj.getAnnIds(imgIds=idx)
@@ -167,8 +164,8 @@ class RundifSequence(Dataset):
             GT = np.array(GT)
             GT = Image.fromarray((np.nansum(GT, axis=0)*255).astype(np.uint8)).convert("L")
 
-            if width_par != 1024:
-                GT = GT.resize((width_par , height_par))
+            if self.width_par != 1024:
+                GT = GT.resize((self.width_par , height_par))
             
             GT = np.array(GT)/255.0
             im = np.array(im)/255.0
@@ -179,7 +176,7 @@ class RundifSequence(Dataset):
                 k_size = 2
                 kernel = ndimage.generate_binary_structure(k_size, k_size)
                 sigma = 5
-                n_it = int(width_par/64)
+                n_it = int(self.width_par/64)
 
                 GT = ndimage.binary_dilation(GT, structure=kernel,iterations=n_it)
                 GT = ndimage.gaussian_filter(GT.astype(np.float32), sigma=sigma)
@@ -205,10 +202,11 @@ class RundifSequence(Dataset):
         return len(self.img_ids_win)
 
 class FlowSet(Dataset):
-    def __init__(self, transform=None):
+    def __init__(self, transform=None,width_par=128):
         
         rng = default_rng()
 
+        self.width_par = width_par
         self.transform = transform
 
         self.coco_obj = coco.COCO("instances_clahe.json")
@@ -381,11 +379,9 @@ class FlowSet(Dataset):
                 
                 if os.path.isdir('/home/mbauer/Data/'):
                     path = "/home/mbauer/Data/differences_clahe/"
-                    width_par = 128
                 
                 elif os.path.isdir('/gpfs/data/fs72241/maibauer/'):
                     path = "/gpfs/data/fs72241/maibauer/differences_clahe/"
-                    width_par = 512
 
                 else:
                     raise FileNotFoundError('No folder with differences found. Please check path.')
@@ -393,16 +389,15 @@ class FlowSet(Dataset):
 
             else:
                 path = "/Volumes/SSD/differences_clahe/"
-                width_par = 128
 
-            height_par = width_par
+            height_par = self.width_par
 
             # Use URL to load image.
 
             im = np.asarray(Image.open(path+img_file_name).convert("L"))
 
-            if width_par != 1024:
-                im = cv2.resize(im  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
+            if self.width_par != 1024:
+                im = cv2.resize(im  , (self.width_par , height_par),interpolation = cv2.INTER_CUBIC)
 
             GT = []
             annotations = self.coco_obj.getAnnIds(imgIds=img_id)
@@ -415,9 +410,9 @@ class FlowSet(Dataset):
             else:
                 GT.append(np.zeros((1024,1024)))
             
-            if width_par != 1024:
+            if self.width_par != 1024:
                 for i in range(len(GT)):
-                    GT[i] = cv2.resize(GT[i]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
+                    GT[i] = cv2.resize(GT[i]  , (self.width_par , height_par),interpolation = cv2.INTER_CUBIC)
 
             dilation = False
 
@@ -475,10 +470,11 @@ class FlowSet(Dataset):
         return self.get_img_and_annotation(index)
 
 class BasicSet(Dataset):
-    def __init__(self, transform=None):
+    def __init__(self, transform=None,width_par=128):
         
         rng = default_rng()
 
+        width_par = self.width_par
         self.transform = transform
 
         self.coco_obj = coco.COCO("instances_clahe.json")
@@ -645,11 +641,9 @@ class BasicSet(Dataset):
             
             if os.path.isdir('/home/mbauer/Data/'):
                 path = "/home/mbauer/Data/differences_clahe/"
-                width_par = 128
             
             elif os.path.isdir('/gpfs/data/fs72241/maibauer/'):
                 path = "/gpfs/data/fs72241/maibauer/differences_clahe/"
-                width_par = 512
 
             else:
                 raise FileNotFoundError('No folder with differences found. Please check path.')
@@ -657,16 +651,15 @@ class BasicSet(Dataset):
 
         else:
             path = "/Volumes/SSD/differences_clahe/"
-            width_par = 128
 
-        height_par = width_par
+        height_par = self.width_par
 
         # Use URL to load image.
 
         im = np.asarray(Image.open(path+img_file_name).convert("L"))
 
-        if width_par != 1024:
-            im = cv2.resize(im  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
+        if self.width_par != 1024:
+            im = cv2.resize(im  , (self.width_par , height_par),interpolation = cv2.INTER_CUBIC)
 
         GT = []
         annotations = self.coco_obj.getAnnIds(imgIds=img_id)
@@ -679,9 +672,9 @@ class BasicSet(Dataset):
         else:
             GT.append(np.zeros((1024,1024)))
         
-        if width_par != 1024:
+        if self.width_par != 1024:
             for i in range(len(GT)):
-                GT[i] = cv2.resize(GT[i]  , (width_par , height_par),interpolation = cv2.INTER_CUBIC)
+                GT[i] = cv2.resize(GT[i]  , (self.width_par , height_par),interpolation = cv2.INTER_CUBIC)
 
         dilation = False
 

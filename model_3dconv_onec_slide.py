@@ -21,7 +21,7 @@ def train(backbone):
     num_workers = 1
     width_par = 128
     aug = True
-    win_size = 16
+    win_size = 32
     stride = int(win_size/8)
 
     if(torch.backends.mps.is_available()):
@@ -41,9 +41,9 @@ def train(backbone):
             device = torch.device("cuda")
             batch_size = 4
             num_workers = 2
-            width_par = 512
+            width_par = 128
 
-            if(torch.cuda.device_count() >1):
+            if(torch.cuda.device_count() > 1):
                 batch_size = 8
                 num_workers = 4
 
@@ -57,8 +57,8 @@ def train(backbone):
         composed = v2.Compose([v2.ToTensor()])
         composed_val = v2.Compose([v2.ToTensor()])
 
-    dataset = RundifSequence(transform=composed,mode='train',win_size=win_size,stride=stride)
-    dataset_val = RundifSequence(transform=composed_val,mode='val',win_size=win_size,stride=stride)
+    dataset = RundifSequence(transform=composed,mode='train',win_size=win_size,stride=stride,width_par=width_par)
+    dataset_val = RundifSequence(transform=composed_val,mode='val',win_size=win_size,stride=stride,width_par=width_par)
 
     indices_train = dataset.train_paired_idx
     indices_val = dataset_val.val_paired_idx

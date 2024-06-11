@@ -1,6 +1,6 @@
 #!/bin/bash
 #  
-#SBATCH -J Train_CNN                           #use -N only if you use both GPUs on the nodes, otherwise leave this line out
+#SBATCH -J Train_3DCONV_MaxAug                           #use -N only if you use both GPUs on the nodes, otherwise leave this line out
 #SBATCH --partition zen2_0256_a40x2
 #SBATCH --qos zen2_0256_a40x2
 #SBATCH --gres=gpu:2                   #or --gres=gpu:1 if you only want to use half a node
@@ -14,7 +14,6 @@ export PYTORCH_ENABLE_MPS_FALLBACK=1
 module purge
 
 nvidia-smi
-module load miniconda3
 eval "$(conda shell.bash hook)"
 
 conda activate cme_ml
@@ -32,7 +31,7 @@ model_3dconv_slide="model_3dconv_onec_slide.py"
 eval_run="evaluation.py"
 eval_folder="run_22022024_133027_model_resnet34"
 
-backbone="unetr" #cnn3d
+backbone="cnn3d" #unetr
 
 if [ "$mode" = "Train" ]
 then

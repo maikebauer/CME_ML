@@ -16,7 +16,7 @@ from scipy import ndimage
 from utils import sep_noevent_data
 
 class RundifSequence(Dataset):
-    def __init__(self, transform=None, mode='train', win_size=16, stride=4,width_par=128):
+    def __init__(self, transform=None, mode='train', win_size=16, stride=2,width_par=128):
         
         rng = default_rng()
 
@@ -81,7 +81,7 @@ class RundifSequence(Dataset):
                 continue
         
         set_val =  np.arange(ev_train[-1]+1, ev_val[-1]+1)
-        set_test = np.arange(ev_val[-1]+1, self.img_ids[-1]-1)
+        set_test = np.arange(ev_val[-1]+1, self.img_ids[-1])
 
         self.train_data_idx = set_train.copy()
         self.val_data_idx = set_val.copy()

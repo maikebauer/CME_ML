@@ -12,6 +12,8 @@ from models import UNETR_16, CNN3D
 from dataset import RundifSequence
 import matplotlib
 from evaluation import evaluate_onec_slide, test_onec_slide
+from torch.utils.tensorboard import SummaryWriter
+import torchvision.utils
 
 def train(backbone):
 
@@ -21,8 +23,10 @@ def train(backbone):
     num_workers = 1
     width_par = 128
     aug = True
-    win_size = 32
-    stride = int(win_size/8)
+    win_size = 16
+    stride = int(2)
+
+    thresh = 0.1
 
     if(torch.backends.mps.is_available()):
         device = torch.device("mps")
@@ -160,7 +164,7 @@ def train(backbone):
         pixel_looser = nn.BCELoss()
     
     os.makedirs(os.path.dirname(train_path), exist_ok=True)
-    os.makedirs(os.path.dirname(im_path), exist_ok=True)
+    #os.makedirs(os.path.dirname(im_path), exist_ok=True)
 
     sigmoid = nn.Sigmoid()
 
@@ -169,6 +173,9 @@ def train(backbone):
     epoch_metrics = []
     best_loss = 1e99
     num_no_improvement = 0
+
+    train_writer = SummaryWriter()
+    val_writer = SummaryWriter()
 
     for epoch in range(num_iter):
         model_seg.train()
@@ -211,53 +218,74 @@ def train(backbone):
             #print('batch_loss: ', batch_loss)
 
         epoch_loss = batch_loss/(num+1)
+        train_writer.add_scalar("Loss/train", epoch_loss, epoch)
 
         optimizer_data.append([epoch, epoch_loss])
 
-        im_path = train_path+'images/'
+        # im_path = train_path+'images/'
             
-        if not os.path.exists(im_path): 
-            os.makedirs(im_path, exist_ok=True) 
-
-        hspace = 0.01
-        wspace = 0.01
-
-        fig,ax = plt.subplots(win_size*np.shape(mask_data)[0], 4, figsize=(2*4+wspace*2, 2*(win_size*np.shape(mask_data)[0])+hspace*(win_size*np.shape(mask_data)[0]-1)))
+        # if not os.path.exists(im_path): 
+        #     os.makedirs(im_path, exist_ok=True) 
         
-        for b in range(np.shape(mask_data)[0]):
-            for w in range(win_size):
-                ax[w+win_size*b][0].imshow(data['image'][b][w][0].detach().cpu().numpy()) #image
-                ax[w+win_size*b][1].imshow(mask_data[b][0][w].detach().cpu().numpy()) #mask
-                if backbone == 'unetr':
-                    ax[w+win_size*b][2].imshow(sigmoid(pred_comb[b,0,w,:,:]).detach().cpu().numpy()) #pred
-                elif backbone == 'cnn3d':
-                    ax[w+win_size*b][2].imshow(pred_comb[b,0,w,:,:].detach().cpu().numpy())
-                ax[w+win_size*b][3].plot(*zip(*optimizer_data)) #loss
+        board_imgs = torch.zeros([int(win_size),int(4), int(width_par), int(width_par)])
 
-                ax[w+win_size*b][0].axis("off")
-                ax[w+win_size*b][1].axis("off")
-                ax[w+win_size*b][2].axis("off")
-                ax[w+win_size*b][3].axis("off")
+        for w in range(win_size):
+            board_imgs[w,0,:,:] = data['image'][0][w][0].detach().cpu()
+            board_imgs[w,1,:,:] = mask_data[0][0][w].detach().cpu()
 
-                ax[w+win_size*b][0].set_aspect("auto")
-                ax[w+win_size*b][1].set_aspect("auto")
-                ax[w+win_size*b][2].set_aspect("auto")
-                ax[w+win_size*b][3].set_aspect("auto")
+            if backbone == 'unetr':
+                bin_pred = sigmoid(pred_comb[0,0,w,:,:]).detach().cpu()
+                board_imgs[w,2,:,:] = bin_pred.clone().cpu()
 
-                ax[w+win_size*b][0].axis("off")
-                ax[w+win_size*b][1].axis("off")
-                ax[w+win_size*b][2].axis("off")
-                ax[w+win_size*b][3].axis("off")
+            elif backbone == 'cnn3d':
+                bin_pred = pred_comb[0,0,w,:,:].detach().cpu()
+                board_imgs[w,2,:,:] = bin_pred.clone().cpu()
+            
+            board_imgs[w,3,:,:] = torch.where(bin_pred > torch.tensor(thresh), torch.tensor(1), torch.tensor(0))
 
-                ax[w+win_size*b][0].set_aspect("auto")
-                ax[w+win_size*b][1].set_aspect("auto")
-                ax[w+win_size*b][2].set_aspect("auto")
-                ax[w+win_size*b][3].set_aspect("auto")
+        img_grid_train = torchvision.utils.make_grid(board_imgs)
 
-                plt.subplots_adjust(wspace=wspace, hspace=hspace)
+        train_writer.add_image('Images/Train_Image-GroundTruth-PredMask-ThreshMask', img_grid_train)
 
-            fig.savefig(im_path+'output_'+model_name+'.png', bbox_inches='tight')
-            plt.close()
+        # hspace = 0.01
+        # wspace = 0.01
+
+        # fig,ax = plt.subplots(win_size*np.shape(mask_data)[0], 4, figsize=(2*4+wspace*2, 2*(win_size*np.shape(mask_data)[0])+hspace*(win_size*np.shape(mask_data)[0]-1)))
+        
+        # for b in range(np.shape(mask_data)[0]):
+        #     for w in range(win_size):
+        #         ax[w+win_size*b][0].imshow(data['image'][b][w][0].detach().cpu().numpy()) #image
+        #         ax[w+win_size*b][1].imshow(mask_data[b][0][w].detach().cpu().numpy()) #mask
+        #         if backbone == 'unetr':
+        #             ax[w+win_size*b][2].imshow(sigmoid(pred_comb[b,0,w,:,:]).detach().cpu().numpy()) #pred
+        #         elif backbone == 'cnn3d':
+        #             ax[w+win_size*b][2].imshow(pred_comb[b,0,w,:,:].detach().cpu().numpy())
+        #         ax[w+win_size*b][3].plot(*zip(*optimizer_data)) #loss
+
+        #         ax[w+win_size*b][0].axis("off")
+        #         ax[w+win_size*b][1].axis("off")
+        #         ax[w+win_size*b][2].axis("off")
+        #         ax[w+win_size*b][3].axis("off")
+
+        #         ax[w+win_size*b][0].set_aspect("auto")
+        #         ax[w+win_size*b][1].set_aspect("auto")
+        #         ax[w+win_size*b][2].set_aspect("auto")
+        #         ax[w+win_size*b][3].set_aspect("auto")
+
+        #         ax[w+win_size*b][0].axis("off")
+        #         ax[w+win_size*b][1].axis("off")
+        #         ax[w+win_size*b][2].axis("off")
+        #         ax[w+win_size*b][3].axis("off")
+
+        #         ax[w+win_size*b][0].set_aspect("auto")
+        #         ax[w+win_size*b][1].set_aspect("auto")
+        #         ax[w+win_size*b][2].set_aspect("auto")
+        #         ax[w+win_size*b][3].set_aspect("auto")
+
+        #         plt.subplots_adjust(wspace=wspace, hspace=hspace)
+
+        #     fig.savefig(im_path+'output_'+model_name+'.png', bbox_inches='tight')
+        #     plt.close()
 
         with torch.no_grad():
             model_seg.eval()
@@ -293,7 +321,6 @@ def train(backbone):
                     pred_comb = model_seg(input_data)
 
                 else:
-
                     print('Invalid backbone...')
                     sys.exit()
 
@@ -315,66 +342,88 @@ def train(backbone):
             
             epoch_loss_val = batch_loss_val/(num+1)
             
+            val_writer.add_scalar("Loss/val", epoch_loss_val, epoch)
+
             optimizer_data_val.append([epoch, epoch_loss_val])
 
-            metrics_im_path = metrics_path+'images/'
+            # metrics_im_path = metrics_path+'images/'
                     
-            if not os.path.exists(metrics_im_path): 
-                os.makedirs(metrics_im_path, exist_ok=True) 
+            # if not os.path.exists(metrics_im_path): 
+            #     os.makedirs(metrics_im_path, exist_ok=True) 
 
-            thresh = 0.1
+            board_imgs = torch.zeros([int(win_size),int(4), int(width_par), int(width_par)])
 
-            hspace = 0.01
-            wspace = 0.01
+            for w in range(win_size):
+                board_imgs[w,0,:,:] = data['image'][0][w][0].detach().cpu()
+                board_imgs[w,1,:,:] = mask_data[0][0][w].detach().cpu()
 
-            fig,ax = plt.subplots(win_size*np.shape(mask_data)[0], 5, figsize=(2*5+wspace*2, 2*(win_size*np.shape(mask_data)[0])+hspace*(win_size*np.shape(mask_data)[0]-1)))
+                if backbone == 'unetr':
+                    bin_pred = sigmoid(pred_comb[0,0,w,:,:]).detach().cpu()
+                    board_imgs[w,2,:,:] = bin_pred.clone().cpu()
+
+                elif backbone == 'cnn3d':
+                    bin_pred = pred_comb[0,0,w,:,:].detach().cpu()
+                    board_imgs[w,2,:,:] = bin_pred.clone().cpu()
+                
+                board_imgs[w,3,:,:] = torch.where(bin_pred > torch.tensor(thresh), torch.tensor(1), torch.tensor(0))
+
+
+            img_grid_val = torchvision.utils.make_grid(board_imgs)
+
+            val_writer.add_image('Images/Val_Image-GroundTruth-PredMask-ThreshMask', img_grid_val)
+
+            # hspace = 0.01
+            # wspace = 0.01
+
+            # fig,ax = plt.subplots(win_size*np.shape(mask_data)[0], 5, figsize=(2*5+wspace*2, 2*(win_size*np.shape(mask_data)[0])+hspace*(win_size*np.shape(mask_data)[0]-1)))
             
-            for b in range(np.shape(mask_data)[0]):
-                for w in range(win_size):
+            # for b in range(np.shape(mask_data)[0]):
+            #     for w in range(win_size):
                     
-                    if backbone == 'unetr':
-                        bin_pred = sigmoid(pred_comb[b,0,w,:,:]).detach().cpu().numpy()
-                    elif backbone == 'cnn3d':
-                        bin_pred = pred_comb[b,0,w,:,:].detach().cpu().numpy()
+            #         if backbone == 'unetr':
+            #             bin_pred = sigmoid(pred_comb[b,0,w,:,:]).detach().cpu().numpy()
+            #         elif backbone == 'cnn3d':
+            #             bin_pred = pred_comb[b,0,w,:,:].detach().cpu().numpy()
 
-                    ax[w+win_size*b][0].imshow(data['image'][b][w][0].detach().cpu().numpy()) #image
-                    ax[w+win_size*b][1].imshow(mask_data[b][0][w].detach().cpu().numpy()) #mask
-                    ax[w+win_size*b][2].imshow(bin_pred) #pred
-                    ax[w+win_size*b][3].imshow(np.where(bin_pred > thresh, 1, 0)) #pred
-                    ax[w+win_size*b][4].plot(*zip(*optimizer_data), color='blue') #loss
-                    ax[w+win_size*b][4].plot(*zip(*optimizer_data_val), color='orange') #loss
-                    ax[w+win_size*b][4].set_yscale('log')
+            #         ax[w+win_size*b][0].imshow(data['image'][b][w][0].detach().cpu().numpy()) #image
+            #         ax[w+win_size*b][1].imshow(mask_data[b][0][w].detach().cpu().numpy()) #mask
+            #         ax[w+win_size*b][2].imshow(bin_pred) #pred
+            #         ax[w+win_size*b][3].imshow(np.where(bin_pred > thresh, 1, 0)) #pred
+            #         ax[w+win_size*b][4].plot(*zip(*optimizer_data), color='blue') #loss
+            #         ax[w+win_size*b][4].plot(*zip(*optimizer_data_val), color='orange') #loss
+            #         ax[w+win_size*b][4].set_yscale('log')
 
-                    ax[w+win_size*b][0].axis("off")
-                    ax[w+win_size*b][1].axis("off")
-                    ax[w+win_size*b][2].axis("off")
-                    ax[w+win_size*b][3].axis("off")
-                    ax[w+win_size*b][4].axis("off")
+            #         ax[w+win_size*b][0].axis("off")
+            #         ax[w+win_size*b][1].axis("off")
+            #         ax[w+win_size*b][2].axis("off")
+            #         ax[w+win_size*b][3].axis("off")
+            #         ax[w+win_size*b][4].axis("off")
 
-                    ax[w+win_size*b][0].set_aspect("auto")
-                    ax[w+win_size*b][1].set_aspect("auto")
-                    ax[w+win_size*b][2].set_aspect("auto")
-                    ax[w+win_size*b][3].set_aspect("auto")
-                    ax[w+win_size*b][4].set_aspect("auto")
+            #         ax[w+win_size*b][0].set_aspect("auto")
+            #         ax[w+win_size*b][1].set_aspect("auto")
+            #         ax[w+win_size*b][2].set_aspect("auto")
+            #         ax[w+win_size*b][3].set_aspect("auto")
+            #         ax[w+win_size*b][4].set_aspect("auto")
 
-                    ax[w+win_size*b][0].axis("off")
-                    ax[w+win_size*b][1].axis("off")
-                    ax[w+win_size*b][2].axis("off")
-                    ax[w+win_size*b][3].axis("off")
-                    ax[w+win_size*b][4].axis("off")
+            #         ax[w+win_size*b][0].axis("off")
+            #         ax[w+win_size*b][1].axis("off")
+            #         ax[w+win_size*b][2].axis("off")
+            #         ax[w+win_size*b][3].axis("off")
+            #         ax[w+win_size*b][4].axis("off")
 
-                    ax[w+win_size*b][0].set_aspect("auto")
-                    ax[w+win_size*b][1].set_aspect("auto")
-                    ax[w+win_size*b][2].set_aspect("auto")
-                    ax[w+win_size*b][3].set_aspect("auto")
-                    ax[w+win_size*b][4].set_aspect("auto")
+            #         ax[w+win_size*b][0].set_aspect("auto")
+            #         ax[w+win_size*b][1].set_aspect("auto")
+            #         ax[w+win_size*b][2].set_aspect("auto")
+            #         ax[w+win_size*b][3].set_aspect("auto")
+            #         ax[w+win_size*b][4].set_aspect("auto")
 
-                    plt.subplots_adjust(wspace=wspace, hspace=hspace)
+            #         plt.subplots_adjust(wspace=wspace, hspace=hspace)
 
-                fig.savefig(metrics_im_path+'output_'+model_name+'.png', bbox_inches='tight')
-                plt.close()
+            #     fig.savefig(metrics_im_path+'output_'+model_name+'.png', bbox_inches='tight')
+            #     plt.close()
 
             input_imgs = np.array(input_imgs)
+
             for h, pred_arr in enumerate(pred_save):
                 for j in range(len(pred_arr)):
                     if backbone == 'unetr':
@@ -394,6 +443,10 @@ def train(backbone):
             metrics = evaluate_onec_slide(pred_save.cpu().detach().numpy(),input_masks.cpu().detach().numpy(),input_imgs.cpu().detach().numpy(), model_name, folder_path, num, epoch, thresh=thresh)
 
             epoch_metrics.append(metrics)
+            
+            val_writer.add_scalar("Metrics/precision", metrics[1], epoch)
+            val_writer.add_scalar("Metrics/recall", metrics[2], epoch)
+            val_writer.add_scalar("Metrics/iou", metrics[3], epoch)
 
             if epoch_loss_val < best_loss:
                 best_loss = epoch_loss_val
@@ -434,8 +487,8 @@ def test(model_name):
     num_workers = 1
     width_par = 128
     aug = True
-    win_size = 32
-    stride = int(win_size/8)
+    win_size = 16
+    stride = int(2)
 
     if(torch.backends.mps.is_available()):
         device = torch.device("mps")

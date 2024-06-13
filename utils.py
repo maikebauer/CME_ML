@@ -1,7 +1,7 @@
     
 import torch
 import torch.nn.functional as F
-
+import numpy as np
 def get_mean_std(loader):
     # Compute the mean and standard deviation of all pixels in the dataset
     num_pixels = 0
@@ -78,3 +78,29 @@ def backward_warp(x, flow, mode='bilinear', padding_mode='border'):
         output = F.grid_sample(x, grid, mode=mode, padding_mode=padding_mode)
 
     return output
+
+def calc_conv(w,k,s,p):
+
+    sz = ((w-k+2*p)/s).astype(int)+1
+
+    return tuple(sz)
+
+def calc_kernel(inp_size, kernel_size, depth):
+
+    kernels = []
+    outputs = np.zeros((depth+1, 3))
+
+    outputs[0] = inp_size
+
+    stride = 2
+    padding = 0
+
+    for i in range(1,depth+1):
+
+        ks = outputs[i-1] % kernel_size
+        ks[ks == 0] = kernel_size
+        kernels.append(tuple(map(int, ks)))
+
+        outputs[i] = calc_conv(outputs[i-1], kernels[i-1], s=stride, p=padding)
+
+    return kernels

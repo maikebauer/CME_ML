@@ -19,8 +19,8 @@ def train(backbone):
 
     device = torch.device("cpu")
 
-    batch_size = 2
-    num_workers = 1
+    batch_size = 4
+    num_workers = 2
     width_par = 128
     aug = True
     win_size = 16
@@ -91,8 +91,10 @@ def train(backbone):
     #normalize_val = v2.Normalize(mean=mean_val, std=std_val)
 
     backbone_name = '3dconv_' + backbone
+    seed = 42
 
     if backbone == 'unetr':
+        torch.manual_seed(seed)
         model_seg = UNETR_16(in_channels=1,
         out_channels=1,
         img_size=(width_par, width_par, win_size),
@@ -106,7 +108,8 @@ def train(backbone):
         res_block=True,
         dropout_rate=0.0)
 
-    elif backbone == 'cnn3d': 
+    elif backbone == 'cnn3d':
+        torch.manual_seed(seed) 
         model_seg = CNN3D(input_channels=1, output_channels=1)
 
     else:
@@ -119,7 +122,7 @@ def train(backbone):
     model_seg.to(device)
 
     g_optimizer_seg = optim.Adam(model_seg.parameters(),1e-5)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(g_optimizer_seg, 'min', patience=3)
+    #scheduler = optim.lr_scheduler.ReduceLROnPlateau(g_optimizer_seg, 'min', patience=3)
     #scheduler = optim.lr_scheduler.StepLR(g_optimizer_seg, step_size=10, gamma=0.1)
     num_iter = 101
 
@@ -245,7 +248,7 @@ def train(backbone):
 
         img_grid_train = torchvision.utils.make_grid(board_imgs)
 
-        train_writer.add_image('Images/Train_Image-GroundTruth-PredMask-ThreshMask', img_grid_train)
+        train_writer.add_image('Images/Train_Image-GroundTruth-PredMask-ThreshMask', img_grid_train, epoch)
 
         # hspace = 0.01
         # wspace = 0.01
@@ -370,7 +373,7 @@ def train(backbone):
 
             img_grid_val = torchvision.utils.make_grid(board_imgs)
 
-            val_writer.add_image('Images/Val_Image-GroundTruth-PredMask-ThreshMask', img_grid_val)
+            val_writer.add_image('Images/Val_Image-GroundTruth-PredMask-ThreshMask', img_grid_val, epoch)
 
             # hspace = 0.01
             # wspace = 0.01
@@ -474,7 +477,7 @@ def train(backbone):
             np.save(metrics_path+'metrics.npy', epoch_metrics)
 
             print(f"Epoch: {epoch:.0f}, Loss: {epoch_loss:.10f}, Val Loss: {epoch_loss_val:.10f}, No improvement in {num_no_improvement:.0f} epochs.")
-            scheduler.step(epoch_loss_val)
+            #scheduler.step(epoch_loss_val)
 
 def test(model_name):
 

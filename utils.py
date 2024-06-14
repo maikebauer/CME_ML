@@ -2,6 +2,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
+
 def get_mean_std(loader):
     # Compute the mean and standard deviation of all pixels in the dataset
     num_pixels = 0

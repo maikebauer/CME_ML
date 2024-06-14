@@ -16,7 +16,7 @@ from scipy import ndimage
 from utils import sep_noevent_data
 
 class RundifSequence(Dataset):
-    def __init__(self, transform=None, mode='train', win_size=16, stride=2,width_par=128):
+    def __init__(self, transform=None, mode='train', win_size=16, stride=2, width_par=128):
         
         rng = default_rng()
 
@@ -24,9 +24,9 @@ class RundifSequence(Dataset):
         self.mode = mode
         self.width_par = width_par
 
-        self.coco_obj = coco.COCO("instances_clahe.json")
+        self.coco_obj = coco.COCO("instances_clahe.json")[:7484]
         
-        self.img_ids = self.coco_obj.getImgIds()[:7484]
+        self.img_ids = self.coco_obj.getImgIds()
 
         self.annotated = []
         self.events = []
@@ -112,8 +112,7 @@ class RundifSequence(Dataset):
 
     def __getitem__(self, index):
        
-        seed = np.random.randint(1000)
-        torch.manual_seed(seed)
+        seed = int(index)
 
         GT_all = []
         im_all = []

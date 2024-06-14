@@ -1,8 +1,8 @@
 #!/bin/bash
 #  
 #SBATCH -J Train_3DCONV                           #use -N only if you use both GPUs on the nodes, otherwise leave this line out
-#SBATCH --partition zen3_0512_a100x2
-#SBATCH --qos zen3_0512_a100x2
+#SBATCH --partition zen2_0256_a40x2
+#SBATCH --qos zen2_0256_a40x2
 #SBATCH --gres=gpu:2                   #or --gres=gpu:1 if you only want to use half a node
 #SBATCH --output=output.txt
 #SBATCH --mail-type=begin        # send email when job begins
@@ -14,6 +14,8 @@ export PYTORCH_ENABLE_MPS_FALLBACK=1
 module purge
 
 nvidia-smi
+module load miniconda3
+
 eval "$(conda shell.bash hook)"
 
 conda activate cme_ml
@@ -58,4 +60,3 @@ then
        python "$eval_run" "$i" "$eval_folder"
     done
 fi
-

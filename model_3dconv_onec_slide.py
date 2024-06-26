@@ -637,17 +637,17 @@ def test(model_name):
 
 if __name__ == "__main__":
     try:
-        backbone = sys.argv[1]
+        backbone = str(sys.argv[1])
     except IndexError:
         backbone = 'cnn3d'
 
     try:
-        mode = sys.argv[2]
+        mode = str(sys.argv[2])
     except IndexError:
         mode = 'train'
 
     try:
-        ind_par = sys.argv[3]
+        ind_par = int(sys.argv[3])
     except IndexError:
         ind_par = None  
 

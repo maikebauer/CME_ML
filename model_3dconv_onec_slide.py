@@ -122,7 +122,7 @@ def train(backbone,ind_par):
     model_seg.to(device)
 
     g_optimizer_seg = optim.Adam(model_seg.parameters(),1e-5)
-    #scheduler = optim.lr_scheduler.ReduceLROnPlateau(g_optimizer_seg, 'min', patience=3)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(g_optimizer_seg, 'min', patience=3)
     #scheduler = optim.lr_scheduler.StepLR(g_optimizer_seg, step_size=10, gamma=0.1)
     num_iter = 101
 

@@ -15,7 +15,7 @@ from evaluation import evaluate_onec_slide, test_onec_slide
 from torch.utils.tensorboard import SummaryWriter
 import torchvision.utils
 
-def train(backbone):
+def train(backbone,ind_par):
 
     device = torch.device("cpu")
 
@@ -61,8 +61,8 @@ def train(backbone):
         composed = v2.Compose([v2.ToTensor()])
         composed_val = v2.Compose([v2.ToTensor()])
 
-    dataset = RundifSequence(transform=composed,mode='train',win_size=win_size,stride=stride,width_par=width_par)
-    dataset_val = RundifSequence(transform=composed_val,mode='val',win_size=win_size,stride=stride,width_par=width_par)
+    dataset = RundifSequence(transform=composed,mode='train',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par)
+    dataset_val = RundifSequence(transform=composed_val,mode='val',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par)
 
     indices_train = dataset.train_paired_idx
     indices_val = dataset_val.val_paired_idx
@@ -132,7 +132,7 @@ def train(backbone):
     now = datetime.now()
     dt_string = now.strftime("%d%m%Y_%H%M%S")
 
-    folder_path = "run_"+dt_string+"_model_"+backbone_name+'/'
+    folder_path = "run_"+dt_string+"_model_"+str(dataset.ind_par)+"_"+backbone_name+'/'
     train_path = 'Model_Train/'+folder_path
     im_path = train_path+'images/'
 
@@ -177,8 +177,10 @@ def train(backbone):
     best_loss = 1e99
     num_no_improvement = 0
 
-    train_writer = SummaryWriter()
-    val_writer = SummaryWriter()
+    log_dir = "runs/" + folder_path[:-1]
+
+    train_writer = SummaryWriter(log_dir)
+    val_writer = SummaryWriter(log_dir)
 
     for epoch in range(num_iter):
         model_seg.train()
@@ -230,25 +232,25 @@ def train(backbone):
         # if not os.path.exists(im_path): 
         #     os.makedirs(im_path, exist_ok=True) 
         
-        board_imgs = torch.zeros([int(win_size),int(4), int(width_par), int(width_par)])
+        # board_imgs = torch.zeros([int(win_size),int(4), int(width_par), int(width_par)])
 
-        for w in range(win_size):
-            board_imgs[w,0,:,:] = data['image'][0][w][0].detach().cpu()
-            board_imgs[w,1,:,:] = mask_data[0][0][w].detach().cpu()
+        # for w in range(win_size):
+        #     board_imgs[w,0,:,:] = data['image'][0][w][0].detach().cpu()
+        #     board_imgs[w,1,:,:] = mask_data[0][0][w].detach().cpu()
 
-            if backbone == 'unetr':
-                bin_pred = sigmoid(pred_comb[0,0,w,:,:]).detach().cpu()
-                board_imgs[w,2,:,:] = bin_pred.clone().cpu()
+        #     if backbone == 'unetr':
+        #         bin_pred = sigmoid(pred_comb[0,0,w,:,:]).detach().cpu()
+        #         board_imgs[w,2,:,:] = bin_pred.clone().cpu()
 
-            elif backbone == 'cnn3d':
-                bin_pred = pred_comb[0,0,w,:,:].detach().cpu()
-                board_imgs[w,2,:,:] = bin_pred.clone().cpu()
+        #     elif backbone == 'cnn3d':
+        #         bin_pred = pred_comb[0,0,w,:,:].detach().cpu()
+        #         board_imgs[w,2,:,:] = bin_pred.clone().cpu()
             
-            board_imgs[w,3,:,:] = torch.where(bin_pred > torch.tensor(thresh), torch.tensor(1), torch.tensor(0))
+        #     board_imgs[w,3,:,:] = torch.where(bin_pred > torch.tensor(thresh), torch.tensor(1), torch.tensor(0))
 
-        img_grid_train = torchvision.utils.make_grid(board_imgs)
+        # img_grid_train = torchvision.utils.make_grid(board_imgs)
 
-        train_writer.add_image('Images/Train_Image-GroundTruth-PredMask-ThreshMask', img_grid_train, epoch)
+        # train_writer.add_image('Images/Train_Image-GroundTruth-PredMask-ThreshMask', img_grid_train, epoch)
 
         # hspace = 0.01
         # wspace = 0.01
@@ -354,26 +356,26 @@ def train(backbone):
             # if not os.path.exists(metrics_im_path): 
             #     os.makedirs(metrics_im_path, exist_ok=True) 
 
-            board_imgs = torch.zeros([int(win_size),int(4), int(width_par), int(width_par)])
+            # board_imgs = torch.zeros([int(win_size),int(4), int(width_par), int(width_par)])
 
-            for w in range(win_size):
-                board_imgs[w,0,:,:] = data['image'][0][w][0].detach().cpu()
-                board_imgs[w,1,:,:] = mask_data[0][0][w].detach().cpu()
+            # for w in range(win_size):
+            #     board_imgs[w,0,:,:] = data['image'][0][w][0].detach().cpu()
+            #     board_imgs[w,1,:,:] = mask_data[0][0][w].detach().cpu()
 
-                if backbone == 'unetr':
-                    bin_pred = sigmoid(pred_comb[0,0,w,:,:]).detach().cpu()
-                    board_imgs[w,2,:,:] = bin_pred.clone().cpu()
+            #     if backbone == 'unetr':
+            #         bin_pred = sigmoid(pred_comb[0,0,w,:,:]).detach().cpu()
+            #         board_imgs[w,2,:,:] = bin_pred.clone().cpu()
 
-                elif backbone == 'cnn3d':
-                    bin_pred = pred_comb[0,0,w,:,:].detach().cpu()
-                    board_imgs[w,2,:,:] = bin_pred.clone().cpu()
+            #     elif backbone == 'cnn3d':
+            #         bin_pred = pred_comb[0,0,w,:,:].detach().cpu()
+            #         board_imgs[w,2,:,:] = bin_pred.clone().cpu()
                 
-                board_imgs[w,3,:,:] = torch.where(bin_pred > torch.tensor(thresh), torch.tensor(1), torch.tensor(0))
+            #     board_imgs[w,3,:,:] = torch.where(bin_pred > torch.tensor(thresh), torch.tensor(1), torch.tensor(0))
 
 
-            img_grid_val = torchvision.utils.make_grid(board_imgs)
+            # img_grid_val = torchvision.utils.make_grid(board_imgs)
 
-            val_writer.add_image('Images/Val_Image-GroundTruth-PredMask-ThreshMask', img_grid_val, epoch)
+            # val_writer.add_image('Images/Val_Image-GroundTruth-PredMask-ThreshMask', img_grid_val, epoch)
 
             # hspace = 0.01
             # wspace = 0.01
@@ -523,6 +525,7 @@ def test(model_name):
     sigmoid = nn.Sigmoid()
 
     backbone = model_name.split('_')[-1]
+    ind_par = int(model_name.split('_')[4])
 
     if backbone == 'unetr':
         model_seg = UNETR_16(in_channels=1,
@@ -546,7 +549,7 @@ def test(model_name):
 
     composed = v2.Compose([v2.ToTensor()])
 
-    dataset = RundifSequence(transform=composed,mode='test',win_size=win_size,stride=stride)
+    dataset = RundifSequence(transform=composed,mode='test',win_size=win_size,stride=stride,ind_par=ind_par)
 
     data_loader = torch.utils.data.DataLoader(
                                                 dataset,
@@ -643,8 +646,13 @@ if __name__ == "__main__":
     except IndexError:
         mode = 'train'
 
+    try:
+        ind_par = sys.argv[3]
+    except IndexError:
+        ind_par = None  
+
     if mode == 'train':
-        train(backbone=backbone)
+        train(backbone=backbone,ind_par=ind_par)
     
     elif mode == 'test':
         model_name = sys.argv[3]

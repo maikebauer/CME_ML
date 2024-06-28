@@ -105,3 +105,21 @@ def calc_kernel(inp_size, kernel_size, depth):
         outputs[i] = calc_conv(outputs[i-1], kernels[i-1], s=stride, p=padding)
 
     return kernels
+
+def check_diff(diff, len_set, evs):
+    
+    if (diff[0] > len_set) and (diff[1] > len_set):
+        ev_ran = np.arange(evs[0]-len_set,evs[-1]+len_set)
+
+    elif (diff[0] > len_set) and (diff[1] <= len_set):
+        ev_ran = np.arange(evs[0]-len_set,evs[-1]+diff[1]-1)
+
+    elif (diff[0] <= len_set) and (diff[1] > len_set):
+        ev_ran = np.arange(evs[0]-diff[0]+1,evs[-1]+len_set)
+
+    elif (diff[0] <= len_set) and (diff[1] <= len_set):
+        ev_ran = np.arange(evs[0]-diff[0]+1,evs[-1]+diff[1]-1)
+    else:
+        print('Error')
+
+    return ev_ran

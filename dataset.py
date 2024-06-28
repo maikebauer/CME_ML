@@ -13,7 +13,8 @@ from numpy.random import default_rng
 import cv2
 from scipy.ndimage.measurements import label
 from scipy import ndimage
-from utils import sep_noevent_data
+from utils import sep_noevent_data, check_diff
+import random
 
 class RundifSequence(Dataset):
     def __init__(self, transform=None, mode='train', win_size=16, stride=2, width_par=128, ind_par=None):
@@ -62,39 +63,60 @@ class RundifSequence(Dataset):
         
         self.events = event_list
 
-        len_train = int(len(self.annotated)*0.7)
-        boundary_train = self.annotated[len_train]        
+        event_ranges = []
 
-        for index, ev_train in enumerate(self.events):
-            if boundary_train in ev_train:
-                index_train = index + 1
-                break
+        for i in range(len(self.events)):
+            len_set = int(len(self.events[i])/2)
+
+            if i == 0:
+                diff = [self.events[i][0] - 0, self.events[i+1][0] - self.events[i][-1]]
+                event_ranges.append(check_diff(diff, len_set, self.events[i]))
+
+            elif i == len(self.events)-1:
+                diff = [self.events[i][0] - event_ranges[i-1][-1], (self.img_ids[-1]-1) - self.events[i][-1]]
+                event_ranges.append(check_diff(diff, len_set, self.events[i]))
+
             else:
-                continue
-
-        set_train = np.arange(0, ev_train[-1]+1)
-
-        len_val = int(len(self.annotated)*0.1)
-        boundary_val = self.annotated[len_train+len_val]
-
-        for index, ev_val in enumerate(self.events):
-            if boundary_val in ev_val:
-                index_val = index + 1
-                break
-            else:
-                continue
+                diff = [self.events[i][0] - event_ranges[i-1][-1], self.events[i+1][0] - self.events[i][-1]]
+                event_ranges.append(check_diff(diff, len_set, self.events[i]))
         
-        set_val =  np.arange(ev_train[-1]+1, ev_val[-1]+1)
-        set_test = np.arange(ev_val[-1]+1, self.img_ids[-1])
+        len_train = int(len(event_ranges)*0.7)
+        len_test = int(len(event_ranges)*0.2)
+        len_val = int(len(event_ranges))-(len_train+len_test)
 
-        self.train_data_idx = set_train.copy()
-        self.val_data_idx = set_val.copy()
-        self.test_data_idx = set_test.copy()
+        all_ind = list(np.arange(0, len(event_ranges)))
 
-        self.train_paired_idx = np.lib.stride_tricks.sliding_window_view(set_train,win_size)[::stride, :]
-        self.val_paired_idx = np.lib.stride_tricks.sliding_window_view(set_val,win_size)[::stride, :]
-        self.test_paired_idx = np.lib.stride_tricks.sliding_window_view(set_test,win_size)[::stride, :]
+        seed = 67
+
+        random.seed(seed)
+        train_ind = random.sample(all_ind, k=len_train)
+        all_ind = list(np.setdiff1d(all_ind, train_ind))
+
+        random.seed(seed)
+        test_ind = random.sample(all_ind, k=len_test)
+        all_ind = np.setdiff1d(all_ind, test_ind)
+
+        val_ind = all_ind.copy()
         
+        set_train = [np.array(event_ranges[i])+1 for i in train_ind]
+        set_test = [np.array(event_ranges[i])+1 for i in test_ind]
+        set_val = [np.array(event_ranges[i])+1 for i in val_ind]
+
+        train_paired_idx = []
+
+        for i in range(len(set_train)):
+            train_paired_idx.append(np.lib.stride_tricks.sliding_window_view(set_train[i],win_size)[::stride, :])
+
+        test_paired_idx = []
+
+        for i in range(len(set_test)):
+            test_paired_idx.append(np.lib.stride_tricks.sliding_window_view(set_test[i],win_size)[::stride, :])
+
+        val_paired_idx = []
+
+        for i in range(len(set_val)):
+            val_paired_idx.append(np.lib.stride_tricks.sliding_window_view(set_val[i],win_size)[::stride, :])        
+
         not_annotated = np.array(np.setdiff1d(np.arange(0,len(self.img_ids)),np.array(self.annotated)))
         self.not_annotated = not_annotated
 
@@ -106,11 +128,11 @@ class RundifSequence(Dataset):
         self.img_ids = np.array(self.img_ids)
 
         if mode == 'train':
-            self.img_ids_win = self.img_ids[self.train_paired_idx]
+            self.img_ids_win = [item for inner_list in train_paired_idx for item in inner_list]
         elif mode == 'val':
-            self.img_ids_win = self.img_ids[self.val_paired_idx]
+            self.img_ids_win = [item for inner_list in val_paired_idx for item in inner_list]
         elif mode == 'test':
-            self.img_ids_win = self.img_ids[self.test_paired_idx]
+            self.img_ids_win = [item for inner_list in test_paired_idx for item in inner_list]
         else:
             sys.exit('Invalid mode. Specifiy either train, val, or test.')
 

@@ -53,7 +53,7 @@ def train(backbone,ind_par):
 
         else:
             sys.exit("Invalid data path. Exiting...")    
-    
+
     if aug == True:
         composed = v2.Compose([v2.ToTensor(), v2.RandomHorizontalFlip(p=0.5), v2.RandomVerticalFlip(p=0.5)])#, v2.RandomAutocontrast(p=0.25), v2.RandomEqualize(p=0.25), v2.RandomPhotometricDistort(p=0.25)])
         composed_val = v2.Compose([v2.ToTensor()])
@@ -64,8 +64,8 @@ def train(backbone,ind_par):
     dataset = RundifSequence(transform=composed,mode='train',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par)
     dataset_val = RundifSequence(transform=composed_val,mode='val',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par)
 
-    indices_train = dataset.train_paired_idx
-    indices_val = dataset_val.val_paired_idx
+    #indices_train = dataset.train_paired_idx
+    indices_val = dataset_val.img_ids_win
 
     data_loader = torch.utils.data.DataLoader(
                                                 dataset,
@@ -118,12 +118,13 @@ def train(backbone,ind_par):
 
     if(torch.cuda.device_count() >1):
         model_seg = torch.nn.DataParallel(model_seg)
-    
+
     model_seg.to(device)
 
     g_optimizer_seg = optim.Adam(model_seg.parameters(),1e-5)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(g_optimizer_seg, 'min', patience=3)
+    #scheduler = optim.lr_scheduler.ReduceLROnPlateau(g_optimizer_seg, 'min', patience=3)
     #scheduler = optim.lr_scheduler.StepLR(g_optimizer_seg, step_size=10, gamma=0.1)
+
     num_iter = 101
 
     optimizer_data = []
@@ -165,14 +166,14 @@ def train(backbone,ind_par):
         pixel_looser = nn.BCEWithLogitsLoss(pos_weight=weights[1])
     elif backbone == 'cnn3d':
         pixel_looser = nn.BCELoss()
-    
+
     os.makedirs(os.path.dirname(train_path), exist_ok=True)
     #os.makedirs(os.path.dirname(im_path), exist_ok=True)
 
     sigmoid = nn.Sigmoid()
 
     metrics_path = 'Model_Metrics/' + folder_path
-    
+
     epoch_metrics = []
     best_loss = 1e99
     num_no_improvement = 0
@@ -297,7 +298,7 @@ def train(backbone,ind_par):
             
             pred_save = []
 
-            n_val = (max(indices_val.flatten())-min(indices_val.flatten()))+1
+            n_val = len(set(np.array(indices_val).flatten()))
 
             input_imgs = np.zeros((n_val, width_par, width_par))
             input_masks = np.zeros((n_val, width_par, width_par))
@@ -307,6 +308,14 @@ def train(backbone,ind_par):
             
             batch_loss_val = 0
             num_batch = 0
+
+            ind_keys = sorted(set(np.array(indices_val).flatten()))
+            ind_set = np.arange(0, len(ind_keys))
+            ind_dict = {}
+
+            for A, B in zip(ind_keys, ind_set):
+                ind_dict[A] = B
+
             for num, data in enumerate(data_loader_val):
 
                 #input_data = normalize_val(data['image']).float().to(device)
@@ -330,11 +339,10 @@ def train(backbone,ind_par):
                     sys.exit()
 
                 loss_seg_val = pixel_looser(pred_comb, mask_data)
-
                 
                 for b in range(mask_data.shape[0]):
                     for k in range(win_size):
-                        current_ind = indices_val[num_batch][k]-min(indices_val.flatten())
+                        current_ind = ind_dict[indices_val[num_batch][k]]
                         pred_save[current_ind].append(pred_comb[b,0,k,:,:])
 
                         if np.all(input_imgs[current_ind]) == 0:
@@ -559,12 +567,20 @@ def test(model_name):
                                                 pin_memory=False
                                             )    
 
-    indices_test = dataset.test_paired_idx
+    indices_test = dataset.img_ids_win
 
     num_batch = 0
+
+    ind_keys = sorted(set(np.array(indices_test).flatten()))
+    ind_set = np.arange(0, len(ind_keys))
+    ind_dict = {}
+
+    for A, B in zip(ind_keys, ind_set):
+        ind_dict[A] = B
+
     pred_save = []
 
-    n_val = (max(indices_test.flatten())-min(indices_test.flatten()))+1
+    n_val = len(set(np.array(indices_test).flatten()))
 
     input_imgs = np.zeros((n_val, width_par, width_par))
     input_masks = np.zeros((n_val, width_par, width_par))
@@ -597,7 +613,7 @@ def test(model_name):
 
             for b in range(mask_data.shape[0]):
                 for k in range(win_size):
-                    current_ind = indices_test[num_batch][k]-min(indices_test.flatten())
+                    current_ind = ind_dict[indices_test[num_batch][k]]
                     pred_save[current_ind].append(pred_comb[b,0,k,:,:].cpu().detach().numpy())
 
                     if np.all(input_imgs[current_ind]) == 0:

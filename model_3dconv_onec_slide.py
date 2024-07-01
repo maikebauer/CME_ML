@@ -685,5 +685,5 @@ if __name__ == "__main__":
         train(backbone=backbone,ind_par=ind_par)
     
     elif mode == 'test':
-        model_name = sys.argv[3]
+        model_name = sys.argv[4]
         test(model_name=model_name)

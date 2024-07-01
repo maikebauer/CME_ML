@@ -86,7 +86,8 @@ class RundifSequence(Dataset):
 
         all_ind = list(np.arange(0, len(event_ranges)))
 
-        seed = 67
+        ###### DO NOT CHANGE THIS SEED ######
+        seed = 42
 
         random.seed(seed)
         train_ind = random.sample(all_ind, k=len_train)
@@ -135,6 +136,10 @@ class RundifSequence(Dataset):
             self.img_ids_win = [item for inner_list in test_paired_idx for item in inner_list]
         else:
             sys.exit('Invalid mode. Specifiy either train, val, or test.')
+
+        self.win_train = sorted(set(np.array([item for inner_list in train_paired_idx for item in inner_list]).flatten()))
+        self.win_val = sorted(set(np.array([item for inner_list in val_paired_idx for item in inner_list]).flatten()))
+        self.win_test = sorted(set(np.array([item for inner_list in test_paired_idx for item in inner_list]).flatten()))
 
     def __getitem__(self, index):
        

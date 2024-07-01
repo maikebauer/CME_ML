@@ -14,6 +14,7 @@ import matplotlib
 from evaluation import evaluate_onec_slide, test_onec_slide
 from torch.utils.tensorboard import SummaryWriter
 import torchvision.utils
+import json
 
 def train(backbone,ind_par):
 
@@ -66,6 +67,9 @@ def train(backbone,ind_par):
 
     #indices_train = dataset.train_paired_idx
     indices_val = dataset_val.img_ids_win
+
+
+
 
     data_loader = torch.utils.data.DataLoader(
                                                 dataset,
@@ -169,6 +173,16 @@ def train(backbone,ind_par):
 
     os.makedirs(os.path.dirname(train_path), exist_ok=True)
     #os.makedirs(os.path.dirname(im_path), exist_ok=True)
+
+    train_list_ind = [l.tolist() for l in dataset.img_ids_win]
+    val_list_ind = [l.tolist() for l in dataset_val.img_ids_win]
+
+    data_indices = {}
+    data_indices["training"] = train_list_ind
+    data_indices["validation"] = val_list_ind
+
+    with open(train_path+"indices.json", "w") as f:
+        json.dump(data_indices, f)
 
     sigmoid = nn.Sigmoid()
 

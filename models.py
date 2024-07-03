@@ -289,6 +289,7 @@ class CNN3D(nn.Module):
         self.decoder_convtr_01 = nn.Sequential(*[nn.ConvTranspose3d(in_channels=64,out_channels=64,kernel_size=3,padding=1)])
         self.decoder_convtr_00 = nn.Sequential(*[nn.ConvTranspose3d(in_channels=64,out_channels=self.output_channels,kernel_size=3,padding=1)])
 
+        self.dropout = nn.Dropout3d()
 
         self.sigmoid = nn.Sigmoid()
 

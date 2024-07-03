@@ -39,28 +39,22 @@ class RundifSequence(Dataset):
         event_list = []
         temp_list = []
 
-        a_id_prev = 0
-
         for a in range(0, len(self.img_ids)):
             anns = self.coco_obj.getAnnIds(imgIds=[self.img_ids[a]])
 
             if(len(anns)>0):
-
                 self.annotated.append(a)
+                temp_list.append(a)
 
-                if (self.img_ids[a] - a_id_prev == 1) or (a_id_prev == 0):
-
-                    temp_list.append(a)
-
-                elif (self.img_ids[a] - a_id_prev) > 1:
-
-                    if len(temp_list) > 0:
-                        event_list.append(temp_list)
+                if a == len(self.img_ids)-1:
+                    event_list.append(temp_list)
+                    
+            else:
+                if len(temp_list) > 0:
+                    event_list.append(temp_list)
 
                     temp_list = []
-         
-                a_id_prev = self.img_ids[a]
-        
+                    
         self.events = event_list
 
         event_ranges = []

@@ -309,6 +309,8 @@ class CNN3D(nn.Module):
         x_11 = F.relu(self.encoder_conv_11(x_10))
         x_1, indices_1 = F.max_pool3d(x_11, kernel_size=kernels[1], stride=2, return_indices=True)
 
+        x_1 = self.dropout(x_1)
+
         # Encoder Stage - 3
         dim_2 = x_1.size()
         x_20 = F.relu(self.encoder_conv_20(x_1))
@@ -322,6 +324,8 @@ class CNN3D(nn.Module):
         x_31 = F.relu(self.encoder_conv_31(x_30))
         x_32 = F.relu(self.encoder_conv_32(x_31))
         x_3, indices_3 = F.max_pool3d(x_32, kernel_size=kernels[3], stride=2, return_indices=True)
+        
+        x_3 = self.dropout(x_3)
         
         # Encoder Stage - 5
         dim_4 = x_3.size()
@@ -345,7 +349,7 @@ class CNN3D(nn.Module):
         x_3d = F.max_unpool3d(x_40d, indices_3, kernel_size=kernels[3], stride=2, output_size=dim_3)
         x_32d = F.relu(self.decoder_convtr_32(x_3d))
         x_31d = F.relu(self.decoder_convtr_31(x_32d))
-        x_30d = F.relu(self.decoder_convtr_30(x_31d))
+        x_30d = self.dropout(F.relu(self.decoder_convtr_30(x_31d)))
 
         x_30d = x_30d + x_2
 
@@ -360,7 +364,7 @@ class CNN3D(nn.Module):
         # Decoder Stage - 2
         x_1d = F.max_unpool3d(x_20d, indices_1, kernel_size=kernels[1], stride=2, output_size=dim_1)
         x_11d = F.relu(self.decoder_convtr_11(x_1d))
-        x_10d = F.relu(self.decoder_convtr_10(x_11d))
+        x_10d = self.dropout(F.relu(self.decoder_convtr_10(x_11d)))
 
 
         x_10d = x_10d + x_0

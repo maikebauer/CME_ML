@@ -59,15 +59,28 @@ def charbonier(x,eps):
 	loss = torch.mean(loss)
 	return loss
 
-def miou_loss(pred_im2, real_im2):
+def miou_loss(pred, gt):
     """
     Differentiable mean IOU loss, as defined in Varghese 2021, equation 11.
     """
     
-    prod_im2 = pred_im2 * real_im2
+    prod_im = pred * gt
 
-    sum_im2 = pred_im2 + real_im2
+    sum_im = pred + gt
 
-    loss = torch.sum(torch.abs(prod_im2))/torch.sum(torch.abs(sum_im2 - prod_im2))
+    loss = 1 - torch.sum(torch.abs(prod_im))/torch.sum(torch.abs(sum_im - prod_im))
+
+    return loss
+
+def dice_loss(pred, gt):
+    """
+    Differentiable dice loss.
+    """
+    
+    prod_im = pred * gt
+
+    sum_im = pred + gt
+
+    loss = 1 - torch.sum(2*prod_im+1)/torch.sum(sum_im+1)
 
     return loss

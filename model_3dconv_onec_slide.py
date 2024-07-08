@@ -11,12 +11,14 @@ import copy
 from models import UNETR_16, CNN3D
 from dataset import RundifSequence
 import matplotlib
-from evaluation import evaluate_onec_slide, test_onec_slide
+from evaluation import evaluate_onec_slide
 from torch.utils.tensorboard import SummaryWriter
 import torchvision.utils
 import json
+# from losses import miou_loss
+from monai.losses.dice import DiceLoss
 
-def train(backbone,ind_par):
+def train(backbone, ind_par):
 
     device = torch.device("cpu")
 
@@ -27,7 +29,7 @@ def train(backbone,ind_par):
     win_size = 16
     stride = int(2)
 
-    thresh = 0.1
+    input_params = {'width_par': width_par, 'win_size': win_size, 'backbone': backbone}
 
     if(torch.backends.mps.is_available()):
         device = torch.device("mps")
@@ -64,12 +66,10 @@ def train(backbone,ind_par):
 
     dataset = RundifSequence(transform=composed,mode='train',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par)
     dataset_val = RundifSequence(transform=composed_val,mode='val',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par)
+    dataset_test = RundifSequence(transform=composed_val,mode='test',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par)
 
-    #indices_train = dataset.train_paired_idx
     indices_val = dataset_val.img_ids_win
-
-
-
+    indices_test = dataset_test.img_ids_win
 
     data_loader = torch.utils.data.DataLoader(
                                                 dataset,
@@ -88,6 +88,15 @@ def train(backbone,ind_par):
                                                 pin_memory=False
                                             )
 
+    data_loader_test = torch.utils.data.DataLoader(
+        
+                                                dataset_test,
+                                                batch_size=batch_size,
+                                                shuffle=False,
+                                                num_workers=num_workers,
+                                                pin_memory=False
+                                            )
+    
     #mean_train, std_train = get_mean_std(data_loader)
     #normalize_train = v2.Normalize(mean=mean_train, std=std_train)
 
@@ -126,8 +135,7 @@ def train(backbone,ind_par):
     model_seg.to(device)
 
     g_optimizer_seg = optim.Adam(model_seg.parameters(),1e-5)
-    #scheduler = optim.lr_scheduler.ReduceLROnPlateau(g_optimizer_seg, 'min', patience=3)
-    #scheduler = optim.lr_scheduler.StepLR(g_optimizer_seg, step_size=10, gamma=0.1)
+    scheduler = optim.lr_scheduler.StepLR(g_optimizer_seg, step_size=40, gamma=0.1)
 
     num_iter = 101
 
@@ -139,12 +147,12 @@ def train(backbone,ind_par):
 
     folder_path = "run_"+dt_string+"_model_"+str(dataset.ind_par)+"_"+backbone_name+'/'
     train_path = 'Model_Train/'+folder_path
-    im_path = train_path+'images/'
+    # im_path = train_path+'images/'
 
-    cme_count = 0
-    bg_count = 0
+    # cme_count = 0
+    # bg_count = 0
 
-    weights = np.zeros(2)
+    # weights = np.zeros(2)
 
     # for data in data_loader:
     #     mask_data = data['gt'].float().to(device).cpu().numpy()
@@ -161,41 +169,41 @@ def train(backbone,ind_par):
     # weights[0] = (n_samples/(n_classes*cme_count))/2
     # weights[1] = (n_samples/(n_classes*bg_count))/1
 
-    weights[0] = 1.0
-    weights[1] = 1.0
+    # weights[0] = 1.0
+    # weights[1] = 1.0
 
-    weights = torch.tensor(weights).to(device, dtype=torch.float32)
+    # weights = torch.tensor(weights).to(device, dtype=torch.float32)
 
     if backbone == 'unetr':
-        pixel_looser = nn.BCEWithLogitsLoss(pos_weight=weights[1])
+        pixel_looser = nn.BCEWithLogitsLoss()
     elif backbone == 'cnn3d':
         pixel_looser = nn.BCELoss()
+        # pixel_looser = DiceLoss()
 
     os.makedirs(os.path.dirname(train_path), exist_ok=True)
     #os.makedirs(os.path.dirname(im_path), exist_ok=True)
 
     train_list_ind = [l.tolist() for l in dataset.img_ids_win]
     val_list_ind = [l.tolist() for l in dataset_val.img_ids_win]
+    test_list_ind = [l.tolist() for l in dataset_test.img_ids_win]
 
     data_indices = {}
     data_indices["training"] = train_list_ind
     data_indices["validation"] = val_list_ind
+    data_indices["test"] = test_list_ind
 
     with open(train_path+"indices.json", "w") as f:
         json.dump(data_indices, f)
 
-    sigmoid = nn.Sigmoid()
+    epoch_metrics_val = []
+    epoch_metrics_test = []
 
-    metrics_path = 'Model_Metrics/' + folder_path
-
-    epoch_metrics = []
     best_loss = 1e99
     num_no_improvement = 0
 
     log_dir = "runs/" + folder_path[:-1]
 
-    train_writer = SummaryWriter(log_dir)
-    val_writer = SummaryWriter(log_dir)
+    sum_writer = SummaryWriter(log_dir)
 
     for epoch in range(num_iter):
         model_seg.train()
@@ -238,242 +246,33 @@ def train(backbone,ind_par):
             #print('batch_loss: ', batch_loss)
 
         epoch_loss = batch_loss/(num+1)
-        train_writer.add_scalar("Loss/train", epoch_loss, epoch)
+        sum_writer.add_scalar("Loss/train", epoch_loss, epoch)
 
         optimizer_data.append([epoch, epoch_loss])
 
-        # im_path = train_path+'images/'
-            
-        # if not os.path.exists(im_path): 
-        #     os.makedirs(im_path, exist_ok=True) 
-        
-        # board_imgs = torch.zeros([int(win_size),int(4), int(width_par), int(width_par)])
-
-        # for w in range(win_size):
-        #     board_imgs[w,0,:,:] = data['image'][0][w][0].detach().cpu()
-        #     board_imgs[w,1,:,:] = mask_data[0][0][w].detach().cpu()
-
-        #     if backbone == 'unetr':
-        #         bin_pred = sigmoid(pred_comb[0,0,w,:,:]).detach().cpu()
-        #         board_imgs[w,2,:,:] = bin_pred.clone().cpu()
-
-        #     elif backbone == 'cnn3d':
-        #         bin_pred = pred_comb[0,0,w,:,:].detach().cpu()
-        #         board_imgs[w,2,:,:] = bin_pred.clone().cpu()
-            
-        #     board_imgs[w,3,:,:] = torch.where(bin_pred > torch.tensor(thresh), torch.tensor(1), torch.tensor(0))
-
-        # img_grid_train = torchvision.utils.make_grid(board_imgs)
-
-        # train_writer.add_image('Images/Train_Image-GroundTruth-PredMask-ThreshMask', img_grid_train, epoch)
-
-        # hspace = 0.01
-        # wspace = 0.01
-
-        # fig,ax = plt.subplots(win_size*np.shape(mask_data)[0], 4, figsize=(2*4+wspace*2, 2*(win_size*np.shape(mask_data)[0])+hspace*(win_size*np.shape(mask_data)[0]-1)))
-        
-        # for b in range(np.shape(mask_data)[0]):
-        #     for w in range(win_size):
-        #         ax[w+win_size*b][0].imshow(data['image'][b][w][0].detach().cpu().numpy()) #image
-        #         ax[w+win_size*b][1].imshow(mask_data[b][0][w].detach().cpu().numpy()) #mask
-        #         if backbone == 'unetr':
-        #             ax[w+win_size*b][2].imshow(sigmoid(pred_comb[b,0,w,:,:]).detach().cpu().numpy()) #pred
-        #         elif backbone == 'cnn3d':
-        #             ax[w+win_size*b][2].imshow(pred_comb[b,0,w,:,:].detach().cpu().numpy())
-        #         ax[w+win_size*b][3].plot(*zip(*optimizer_data)) #loss
-
-        #         ax[w+win_size*b][0].axis("off")
-        #         ax[w+win_size*b][1].axis("off")
-        #         ax[w+win_size*b][2].axis("off")
-        #         ax[w+win_size*b][3].axis("off")
-
-        #         ax[w+win_size*b][0].set_aspect("auto")
-        #         ax[w+win_size*b][1].set_aspect("auto")
-        #         ax[w+win_size*b][2].set_aspect("auto")
-        #         ax[w+win_size*b][3].set_aspect("auto")
-
-        #         ax[w+win_size*b][0].axis("off")
-        #         ax[w+win_size*b][1].axis("off")
-        #         ax[w+win_size*b][2].axis("off")
-        #         ax[w+win_size*b][3].axis("off")
-
-        #         ax[w+win_size*b][0].set_aspect("auto")
-        #         ax[w+win_size*b][1].set_aspect("auto")
-        #         ax[w+win_size*b][2].set_aspect("auto")
-        #         ax[w+win_size*b][3].set_aspect("auto")
-
-        #         plt.subplots_adjust(wspace=wspace, hspace=hspace)
-
-        #     fig.savefig(im_path+'output_'+model_name+'.png', bbox_inches='tight')
-        #     plt.close()
-
         with torch.no_grad():
-            model_seg.eval()
-            
-            pred_save = []
 
-            n_val = len(set(np.array(indices_val).flatten()))
+            val_metrics, epoch_loss_val = evaluate(data_loader_val, model_seg, device, indices_val, pixel_looser, input_params)
 
-            input_imgs = np.zeros((n_val, width_par, width_par))
-            input_masks = np.zeros((n_val, width_par, width_par))
-
-            for val in range(n_val):
-                pred_save.append([])
-            
-            batch_loss_val = 0
-            num_batch = 0
-
-            ind_keys = sorted(set(np.array(indices_val).flatten()))
-            ind_set = np.arange(0, len(ind_keys))
-            ind_dict = {}
-
-            for A, B in zip(ind_keys, ind_set):
-                ind_dict[A] = B
-
-            for num, data in enumerate(data_loader_val):
-
-                #input_data = normalize_val(data['image']).float().to(device)
-                input_data = data['image'].float().to(device)
-                mask_data = data['gt'].float().to(device)
-
-                if backbone == 'unetr':
-                    
-                    im_concat = torch.permute(input_data, (0, 2, 3, 4, 1))
-                    pred_comb = model_seg(im_concat)
-                    mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
-                    input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
-
-                elif backbone == 'cnn3d':
-                    input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
-                    mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
-                    pred_comb = model_seg(input_data)
-
-                else:
-                    print('Invalid backbone...')
-                    sys.exit()
-
-                loss_seg_val = pixel_looser(pred_comb, mask_data)
-                
-                for b in range(mask_data.shape[0]):
-                    for k in range(win_size):
-                        current_ind = ind_dict[indices_val[num_batch][k]]
-                        pred_save[current_ind].append(pred_comb[b,0,k,:,:])
-
-                        if np.all(input_imgs[current_ind]) == 0:
-                            input_imgs[current_ind] = input_data[b,0,k,:,:].cpu().detach().numpy()
-                            input_masks[current_ind] = mask_data[b,0,k,:,:].cpu().detach().numpy()
-
-                    num_batch = num_batch + 1
-
-                batch_loss_val = batch_loss_val + loss_seg_val.item()
-            
-            epoch_loss_val = batch_loss_val/(num+1)
-            
-            val_writer.add_scalar("Loss/val", epoch_loss_val, epoch)
+            sum_writer.add_scalar("Loss/val", epoch_loss_val, epoch)
 
             optimizer_data_val.append([epoch, epoch_loss_val])
 
-            # metrics_im_path = metrics_path+'images/'
-                    
-            # if not os.path.exists(metrics_im_path): 
-            #     os.makedirs(metrics_im_path, exist_ok=True) 
-
-            # board_imgs = torch.zeros([int(win_size),int(4), int(width_par), int(width_par)])
-
-            # for w in range(win_size):
-            #     board_imgs[w,0,:,:] = data['image'][0][w][0].detach().cpu()
-            #     board_imgs[w,1,:,:] = mask_data[0][0][w].detach().cpu()
-
-            #     if backbone == 'unetr':
-            #         bin_pred = sigmoid(pred_comb[0,0,w,:,:]).detach().cpu()
-            #         board_imgs[w,2,:,:] = bin_pred.clone().cpu()
-
-            #     elif backbone == 'cnn3d':
-            #         bin_pred = pred_comb[0,0,w,:,:].detach().cpu()
-            #         board_imgs[w,2,:,:] = bin_pred.clone().cpu()
-                
-            #     board_imgs[w,3,:,:] = torch.where(bin_pred > torch.tensor(thresh), torch.tensor(1), torch.tensor(0))
-
-
-            # img_grid_val = torchvision.utils.make_grid(board_imgs)
-
-            # val_writer.add_image('Images/Val_Image-GroundTruth-PredMask-ThreshMask', img_grid_val, epoch)
-
-            # hspace = 0.01
-            # wspace = 0.01
-
-            # fig,ax = plt.subplots(win_size*np.shape(mask_data)[0], 5, figsize=(2*5+wspace*2, 2*(win_size*np.shape(mask_data)[0])+hspace*(win_size*np.shape(mask_data)[0]-1)))
+            epoch_metrics_val.append(val_metrics)
             
-            # for b in range(np.shape(mask_data)[0]):
-            #     for w in range(win_size):
-                    
-            #         if backbone == 'unetr':
-            #             bin_pred = sigmoid(pred_comb[b,0,w,:,:]).detach().cpu().numpy()
-            #         elif backbone == 'cnn3d':
-            #             bin_pred = pred_comb[b,0,w,:,:].detach().cpu().numpy()
+            sum_writer.add_scalar("Precision/val", val_metrics[1], epoch)
+            sum_writer.add_scalar("Recall/val", val_metrics[2], epoch)
+            sum_writer.add_scalar("IOU/val", val_metrics[3], epoch)
 
-            #         ax[w+win_size*b][0].imshow(data['image'][b][w][0].detach().cpu().numpy()) #image
-            #         ax[w+win_size*b][1].imshow(mask_data[b][0][w].detach().cpu().numpy()) #mask
-            #         ax[w+win_size*b][2].imshow(bin_pred) #pred
-            #         ax[w+win_size*b][3].imshow(np.where(bin_pred > thresh, 1, 0)) #pred
-            #         ax[w+win_size*b][4].plot(*zip(*optimizer_data), color='blue') #loss
-            #         ax[w+win_size*b][4].plot(*zip(*optimizer_data_val), color='orange') #loss
-            #         ax[w+win_size*b][4].set_yscale('log')
+            test_metrics, epoch_loss_test = evaluate(data_loader_test, model_seg, device, indices_test, pixel_looser, input_params)
 
-            #         ax[w+win_size*b][0].axis("off")
-            #         ax[w+win_size*b][1].axis("off")
-            #         ax[w+win_size*b][2].axis("off")
-            #         ax[w+win_size*b][3].axis("off")
-            #         ax[w+win_size*b][4].axis("off")
+            sum_writer.add_scalar("Loss/test", epoch_loss_test, epoch)
 
-            #         ax[w+win_size*b][0].set_aspect("auto")
-            #         ax[w+win_size*b][1].set_aspect("auto")
-            #         ax[w+win_size*b][2].set_aspect("auto")
-            #         ax[w+win_size*b][3].set_aspect("auto")
-            #         ax[w+win_size*b][4].set_aspect("auto")
+            epoch_metrics_test.append(test_metrics)
 
-            #         ax[w+win_size*b][0].axis("off")
-            #         ax[w+win_size*b][1].axis("off")
-            #         ax[w+win_size*b][2].axis("off")
-            #         ax[w+win_size*b][3].axis("off")
-            #         ax[w+win_size*b][4].axis("off")
-
-            #         ax[w+win_size*b][0].set_aspect("auto")
-            #         ax[w+win_size*b][1].set_aspect("auto")
-            #         ax[w+win_size*b][2].set_aspect("auto")
-            #         ax[w+win_size*b][3].set_aspect("auto")
-            #         ax[w+win_size*b][4].set_aspect("auto")
-
-            #         plt.subplots_adjust(wspace=wspace, hspace=hspace)
-
-            #     fig.savefig(metrics_im_path+'output_'+model_name+'.png', bbox_inches='tight')
-            #     plt.close()
-
-            input_imgs = np.array(input_imgs)
-
-            for h, pred_arr in enumerate(pred_save):
-                for j in range(len(pred_arr)):
-                    if backbone == 'unetr':
-                        pred_arr[j] = sigmoid(pred_arr[j].cpu().detach())#*(j+1)/len(pred_arr)
-                    elif backbone == 'cnn3d':
-                        pred_arr[j] = pred_arr[j].cpu().detach()#*(j+1)/len(pred_arr)
-                
-                pred_save[h] = np.nanmean(pred_arr,axis=0)
-                #pred_save[h] = np.nanmax(pred_arr,axis=0)
-                #pred_save[h] = np.where(pred_save[h] > 1, 1, pred_save[h])
-
-            pred_save = np.array(pred_save)
-            pred_save = torch.Tensor(pred_save)
-            input_imgs = torch.Tensor(input_imgs)
-            input_masks = torch.Tensor(input_masks)
-
-            metrics = evaluate_onec_slide(pred_save.cpu().detach().numpy(),input_masks.cpu().detach().numpy(),input_imgs.cpu().detach().numpy(), model_name, folder_path, num, epoch, thresh=thresh)
-
-            epoch_metrics.append(metrics)
-            
-            val_writer.add_scalar("Metrics/precision", metrics[1], epoch)
-            val_writer.add_scalar("Metrics/recall", metrics[2], epoch)
-            val_writer.add_scalar("Metrics/iou", metrics[3], epoch)
+            sum_writer.add_scalar("Precision/test", test_metrics[1], epoch)
+            sum_writer.add_scalar("Recall/test", test_metrics[2], epoch)
+            sum_writer.add_scalar("IOU/test", test_metrics[3], epoch)
 
             if epoch_loss_val < best_loss:
                 best_loss = epoch_loss_val
@@ -492,16 +291,101 @@ def train(backbone,ind_par):
             else:
                 num_no_improvement += 1
 
-                #if num_no_improvement >= 6:
-                #    sys.exit()
+            print(f"Epoch: {epoch:.0f}, Loss: {epoch_loss:.10f}, Val Loss: {epoch_loss_val:.10f}, Test Loss: {epoch_loss_test:.10f}, No improvement in {num_no_improvement:.0f} epochs.")
+        
+        scheduler.step()
 
-            if not os.path.exists(metrics_path): 
-                os.makedirs(metrics_path, exist_ok=True) 
+    sum_writer.close()
 
-            np.save(metrics_path+'metrics.npy', epoch_metrics)
+def evaluate(data_loader, model_seg, device, indices, pixel_looser, input_params):
 
-            print(f"Epoch: {epoch:.0f}, Loss: {epoch_loss:.10f}, Val Loss: {epoch_loss_val:.10f}, No improvement in {num_no_improvement:.0f} epochs.")
-            #scheduler.step(epoch_loss_val)
+    model_seg.eval()
+
+    sigmoid = nn.Sigmoid()
+
+    thresh = 0.1
+
+    width_par = input_params['width_par']
+    win_size = input_params['win_size']
+    backbone = input_params['backbone']
+
+    pred_save = []
+
+    n_ind = len(set(np.array(indices).flatten()))
+
+    input_imgs = np.zeros((n_ind, width_par, width_par))
+    input_masks = np.zeros((n_ind, width_par, width_par))
+
+    for val in range(n_ind):
+        pred_save.append([])
+    
+    batch_loss = 0
+    num_batch = 0
+
+    ind_keys = sorted(set(np.array(indices).flatten()))
+    ind_set = np.arange(0, len(ind_keys))
+    ind_dict = {}
+
+    for A, B in zip(ind_keys, ind_set):
+        ind_dict[A] = B
+
+    for num, data in enumerate(data_loader):
+        
+        input_data = data['image'].float().to(device)
+        mask_data = data['gt'].float().to(device)
+
+        if backbone == 'unetr':
+            
+            im_concat = torch.permute(input_data, (0, 2, 3, 4, 1))
+            pred_comb = model_seg(im_concat)
+            mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
+            input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
+
+        elif backbone == 'cnn3d':
+            input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
+            mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
+            pred_comb = model_seg(input_data)
+
+        else:
+            print('Invalid backbone...')
+            sys.exit()
+
+        loss_seg = pixel_looser(pred_comb, mask_data)
+        
+        for b in range(mask_data.shape[0]):
+            for k in range(win_size):
+                current_ind = ind_dict[indices[num_batch][k]]
+                pred_save[current_ind].append(pred_comb[b,0,k,:,:])
+
+                if np.all(input_imgs[current_ind]) == 0:
+                    input_imgs[current_ind] = input_data[b,0,k,:,:].cpu().detach().numpy()
+                    input_masks[current_ind] = mask_data[b,0,k,:,:].cpu().detach().numpy()
+
+            num_batch = num_batch + 1
+
+        batch_loss = batch_loss + loss_seg.item()
+    
+    epoch_loss = batch_loss/(num+1)
+
+    input_imgs = np.array(input_imgs)
+
+    for h, pred_arr in enumerate(pred_save):
+        for j in range(len(pred_arr)):
+            if backbone == 'unetr':
+                pred_arr[j] = sigmoid(pred_arr[j].cpu().detach())
+            elif backbone == 'cnn3d':
+                pred_arr[j] = pred_arr[j].cpu().detach()
+        
+        pred_save[h] = np.nanmean(pred_arr,axis=0)
+
+    pred_save = np.array(pred_save)
+    pred_save = torch.Tensor(pred_save)
+    input_imgs = torch.Tensor(input_imgs)
+    input_masks = torch.Tensor(input_masks)
+
+    metrics = evaluate_onec_slide(pred_save.cpu().detach().numpy(),input_masks.cpu().detach().numpy(), thresh=thresh)
+
+    return metrics, epoch_loss
 
 def test(model_name):
 
@@ -543,11 +427,18 @@ def test(model_name):
         else:
             sys.exit("Invalid data path. Exiting...")    
 
-    
     sigmoid = nn.Sigmoid()
 
     backbone = model_name.split('_')[-1]
     ind_par = int(model_name.split('_')[4])
+
+    input_params = {'width_par': width_par, 'win_size': win_size, 'backbone': backbone}
+
+    if backbone == 'unetr':
+        pixel_looser = nn.BCEWithLogitsLoss()
+    elif backbone == 'cnn3d':
+        pixel_looser = nn.BCELoss()
+        # pixel_looser = DiceLoss()
 
     if backbone == 'unetr':
         model_seg = UNETR_16(in_channels=1,
@@ -583,80 +474,10 @@ def test(model_name):
 
     indices_test = dataset.img_ids_win
 
-    num_batch = 0
-
-    ind_keys = sorted(set(np.array(indices_test).flatten()))
-    ind_set = np.arange(0, len(ind_keys))
-    ind_dict = {}
-
-    for A, B in zip(ind_keys, ind_set):
-        ind_dict[A] = B
-
-    pred_save = []
-
-    n_val = len(set(np.array(indices_test).flatten()))
-
-    input_imgs = np.zeros((n_val, width_par, width_par))
-    input_masks = np.zeros((n_val, width_par, width_par))
-
-    for val in range(n_val):
-        pred_save.append([])
-
-    model_seg.eval()
-
     with torch.no_grad():
-        for num, data in enumerate(data_loader):
 
-            input_data = data['image'].float().to(device)
-            mask_data = data['gt'].float().to(device)
-
-            if backbone == 'unetr':
-                im_concat = torch.permute(input_data, (0, 2, 3, 4, 1))
-                pred_comb = model_seg(im_concat)
-                mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
-
-            elif backbone == 'cnn3d':
-                input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
-                mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
-                pred_comb = model_seg(input_data)
-
-            else:
-                print('Invalid backbone...')
-                sys.exit()
-
-
-            for b in range(mask_data.shape[0]):
-                for k in range(win_size):
-                    current_ind = ind_dict[indices_test[num_batch][k]]
-                    pred_save[current_ind].append(pred_comb[b,0,k,:,:].cpu().detach().numpy())
-
-                    if np.all(input_imgs[current_ind]) == 0:
-                        input_imgs[current_ind] = input_data[b,0,k,:,:].cpu().detach().numpy()
-                        input_masks[current_ind] = mask_data[b,0,k,:,:].cpu().detach().numpy()
-
-                num_batch = num_batch + 1
-
-    input_imgs = np.array(input_imgs)
-
-    for h, pred_arr in enumerate(pred_save):
-        for j in range(len(pred_arr)):
-            if backbone == 'unetr':
-                pred_arr[j] = sigmoid(pred_arr[j])
-            elif backbone == 'cnn3d':
-                pred_arr[j] = pred_arr[j]
-
-    pred_final = np.zeros((n_val, width_par, width_par))
-
-    for h, pred_arr in enumerate(pred_save):
-        pred_prep = np.zeros((len(pred_arr), width_par, width_par))
-        for j in range(len(pred_arr)):
-            pred_prep[j] = pred_arr[j]
-
-        pred_final[h] = np.nanmean(pred_prep, axis=0)
+        metrics, epoch_loss = evaluate(data_loader, model_seg, device, indices_test, pixel_looser, input_params)
     
-    thresh = 0.1
-    metrics = test_onec_slide(pred_final,input_masks,input_imgs, model_name+'/', thresh=thresh)
-
     metrics_path = 'Model_Test/' + model_name+ '/'
 
     if not os.path.exists(metrics_path): 

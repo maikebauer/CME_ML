@@ -1,7 +1,5 @@
 import torch
 from torch import nn,optim
-from PIL import Image
-import matplotlib.pyplot as plt 
 import numpy as np
 from torchvision.transforms import v2
 import sys
@@ -10,20 +8,17 @@ from datetime import datetime
 import copy
 from models import UNETR_16, CNN3D
 from dataset import RundifSequence
-import matplotlib
 from evaluation import evaluate_onec_slide
 from torch.utils.tensorboard import SummaryWriter
-import torchvision.utils
 import json
-# from losses import miou_loss
 from monai.losses.dice import DiceLoss
 
 def train(backbone, ind_par):
 
     device = torch.device("cpu")
 
-    batch_size = 4
-    num_workers = 2
+    batch_size = 8
+    num_workers = 4
     width_par = 128
     aug = True
     win_size = 16
@@ -48,7 +43,6 @@ def train(backbone, ind_par):
             device = torch.device("cuda")
             batch_size = 4
             num_workers = 2
-            width_par = 128
 
             if(torch.cuda.device_count() > 1):
                 batch_size = 8
@@ -135,6 +129,7 @@ def train(backbone, ind_par):
     model_seg.to(device)
 
     g_optimizer_seg = optim.Adam(model_seg.parameters(),1e-5)
+
     scheduler = optim.lr_scheduler.StepLR(g_optimizer_seg, step_size=40, gamma=0.1)
 
     num_iter = 101
@@ -177,8 +172,8 @@ def train(backbone, ind_par):
     if backbone == 'unetr':
         pixel_looser = nn.BCEWithLogitsLoss()
     elif backbone == 'cnn3d':
-        pixel_looser = nn.BCELoss()
-        # pixel_looser = DiceLoss()
+        # pixel_looser = nn.BCELoss()
+        pixel_looser = DiceLoss()
 
     os.makedirs(os.path.dirname(train_path), exist_ok=True)
     #os.makedirs(os.path.dirname(im_path), exist_ok=True)
@@ -418,7 +413,6 @@ def test(model_name):
             device = torch.device("cuda")
             batch_size = 4
             num_workers = 2
-            width_par = 128
 
             if(torch.cuda.device_count() >1):
                 batch_size = 8
@@ -437,8 +431,8 @@ def test(model_name):
     if backbone == 'unetr':
         pixel_looser = nn.BCEWithLogitsLoss()
     elif backbone == 'cnn3d':
-        pixel_looser = nn.BCELoss()
-        # pixel_looser = DiceLoss()
+        # pixel_looser = nn.BCELoss()
+        pixel_looser = DiceLoss()
 
     if backbone == 'unetr':
         model_seg = UNETR_16(in_channels=1,
@@ -462,7 +456,7 @@ def test(model_name):
 
     composed = v2.Compose([v2.ToTensor()])
 
-    dataset = RundifSequence(transform=composed,mode='test',win_size=win_size,stride=stride,ind_par=ind_par)
+    dataset = RundifSequence(transform=composed,mode='test',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par)
 
     data_loader = torch.utils.data.DataLoader(
                                                 dataset,

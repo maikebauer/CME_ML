@@ -7,6 +7,13 @@ from monai.networks.blocks.dynunet_block import UnetOutBlock
 from monai.networks.nets import ViT
 import torch.nn.functional as F
 from utils import calc_kernel
+from modules import (
+    ResidualConv,
+    ASPP,
+    AttentionBlock,
+    Upsample_,
+    Squeeze_Excite_Block,
+)
 
 
 kernel_initializer = 'he_uniform'
@@ -200,7 +207,6 @@ class UNETR_16(nn.Module):
 
             # copy weights from  encoding blocks (default: num of blocks: 12)
             for bname, block in self.vit.blocks.named_children():
-                print(block)
                 block.loadFrom(weights, n_block=bname)
             # last norm layer of transformer
             self.vit.norm.weight.copy_(weights["state_dict"]["module.transformer.norm.weight"])
@@ -242,8 +248,154 @@ class UNETR_16(nn.Module):
 
         return logits
 
-
 class CNN3D(nn.Module):
+    def __init__(self, input_channels, output_channels):
+        super(CNN3D, self).__init__()
+
+        self.input_channels = input_channels
+        self.output_channels = output_channels
+    
+     # Encoder layers
+
+        self.encoder_conv_00 = nn.Sequential(*[nn.Conv3d(in_channels=self.input_channels,out_channels=64,kernel_size=7,padding=3)])
+        self.encoder_conv_01 = nn.Sequential(*[nn.Conv3d(in_channels=64,out_channels=64,kernel_size=7,padding=3)])
+
+        self.encoder_conv_10 = nn.Sequential(*[nn.Conv3d(in_channels=64,out_channels=128,kernel_size=7,padding=3)])
+        self.encoder_conv_11 = nn.Sequential(*[nn.Conv3d(in_channels=128,out_channels=128,kernel_size=7,padding=3)])
+
+        self.encoder_conv_20 = nn.Sequential(*[nn.Conv3d(in_channels=128,out_channels=256,kernel_size=3,padding=1)])
+        self.encoder_conv_21 = nn.Sequential(*[nn.Conv3d(in_channels=256,out_channels=256,kernel_size=3,padding=1)])
+        self.encoder_conv_22 = nn.Sequential(*[nn.Conv3d(in_channels=256,out_channels=256,kernel_size=3,padding=1)])
+
+        self.encoder_conv_30 = nn.Sequential(*[nn.Conv3d(in_channels=256,out_channels=512,kernel_size=3,padding=1)])
+        self.encoder_conv_31 = nn.Sequential(*[nn.Conv3d(in_channels=512,out_channels=512,kernel_size=3,padding=1)])
+        self.encoder_conv_32 = nn.Sequential(*[nn.Conv3d(in_channels=512,out_channels=512,kernel_size=3,padding=1)])
+
+        self.encoder_conv_40 = nn.Sequential(*[nn.Conv3d(in_channels=512,out_channels=512,kernel_size=3,padding=1)])
+        self.encoder_conv_41 = nn.Sequential(*[nn.Conv3d(in_channels=512,out_channels=512,kernel_size=3,padding=1)])
+        self.encoder_conv_42 = nn.Sequential(*[nn.Conv3d(in_channels=512,out_channels=512,kernel_size=3,padding=1)])
+
+
+        # Decoder layers
+
+        self.decoder_convtr_42 = nn.Sequential(*[nn.ConvTranspose3d(in_channels=512,out_channels=512,kernel_size=3,padding=1)])
+        self.decoder_convtr_41 = nn.Sequential(*[nn.ConvTranspose3d(in_channels=512,out_channels=512,kernel_size=3,padding=1)])
+        self.decoder_convtr_40 = nn.Sequential(*[nn.ConvTranspose3d(in_channels=512,out_channels=512,kernel_size=3,padding=1)])
+
+        self.decoder_convtr_32 = nn.Sequential(*[nn.ConvTranspose3d(in_channels=512,out_channels=512,kernel_size=3,padding=1)])
+        self.decoder_convtr_31 = nn.Sequential(*[nn.ConvTranspose3d(in_channels=512,out_channels=512,kernel_size=3,padding=1)])
+        self.decoder_convtr_30 = nn.Sequential(*[nn.ConvTranspose3d(in_channels=512,out_channels=256,kernel_size=3,padding=1)])
+
+        self.decoder_convtr_22 = nn.Sequential(*[nn.ConvTranspose3d(in_channels=256,out_channels=256,kernel_size=3,padding=1)])
+        self.decoder_convtr_21 = nn.Sequential(*[nn.ConvTranspose3d(in_channels=256,out_channels=256,kernel_size=3,padding=1)])
+        self.decoder_convtr_20 = nn.Sequential(*[nn.ConvTranspose3d(in_channels=256,out_channels=128,kernel_size=3,padding=1)])
+
+        self.decoder_convtr_11 = nn.Sequential(*[nn.ConvTranspose3d(in_channels=128,out_channels=128,kernel_size=3,padding=1)])
+        self.decoder_convtr_10 = nn.Sequential(*[nn.ConvTranspose3d(in_channels=128,out_channels=64,kernel_size=3,padding=1)])
+
+        self.decoder_convtr_01 = nn.Sequential(*[nn.ConvTranspose3d(in_channels=64,out_channels=64,kernel_size=3,padding=1)])
+        self.decoder_convtr_00 = nn.Sequential(*[nn.ConvTranspose3d(in_channels=64,out_channels=self.output_channels,kernel_size=3,padding=1)])
+
+        self.dropout = nn.Dropout3d()
+
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, input_img):
+
+        # Encoder Stage - 1
+        dim_0 = input_img.size()
+        x_00 = F.relu(self.encoder_conv_00(input_img))
+        x_01 = F.relu(self.encoder_conv_01(x_00))
+
+        kernels = calc_kernel(x_01.size()[2:], kernel_size=2, depth=5)
+        x_0, indices_0 = F.max_pool3d(x_01, kernel_size=kernels[0], stride=2, return_indices=True)
+
+        # Encoder Stage - 2
+        dim_1 = x_0.size()
+        x_10 = F.relu(self.encoder_conv_10(x_0))
+        x_11 = F.relu(self.encoder_conv_11(x_10))
+        x_1, indices_1 = F.max_pool3d(x_11, kernel_size=kernels[1], stride=2, return_indices=True)
+
+        x_1 = self.dropout(x_1)
+
+        # Encoder Stage - 3
+        dim_2 = x_1.size()
+        x_20 = F.relu(self.encoder_conv_20(x_1))
+        x_21 = F.relu(self.encoder_conv_21(x_20))
+        x_22 = F.relu(self.encoder_conv_22(x_21))
+        x_2, indices_2 = F.max_pool3d(x_22, kernel_size=kernels[2], stride=2, return_indices=True)
+
+        # Encoder Stage - 4
+        dim_3 = x_2.size()
+        x_30 = F.relu(self.encoder_conv_30(x_2))
+        x_31 = F.relu(self.encoder_conv_31(x_30))
+        x_32 = F.relu(self.encoder_conv_32(x_31))
+        x_3, indices_3 = F.max_pool3d(x_32, kernel_size=kernels[3], stride=2, return_indices=True)
+        
+        x_3 = self.dropout(x_3)
+        
+        # Encoder Stage - 5
+        dim_4 = x_3.size()
+        x_40 = F.relu(self.encoder_conv_40(x_3))
+        x_41 = F.relu(self.encoder_conv_41(x_40))
+        x_42 = F.relu(self.encoder_conv_42(x_41))
+        x_4, indices_4 = F.max_pool3d(x_42, kernel_size=kernels[4], stride=2, return_indices=True)
+        
+        # Decoder
+
+        # Decoder Stage - 5
+        x_4d = F.max_unpool3d(x_4, indices_4, kernel_size=kernels[4], stride=2, output_size=dim_4)
+        x_42d = F.relu(self.decoder_convtr_42(x_4d))
+        x_41d = F.relu(self.decoder_convtr_41(x_42d))
+        x_40d = F.relu(self.decoder_convtr_40(x_41d))
+
+        x_40d = x_40d + x_3
+        # x_40d = torch.cat((x_40d, x_3), dim=1)
+        # c_40d = nn.Sequential(*[nn.Conv3d(in_channels=x_40d.size()[1],out_channels=indices_3.size()[1],kernel_size=3,padding=1)]).to(x_40d.device)
+        # x_40d = F.relu(c_40d(x_40d))
+
+        # Decoder Stage - 4
+        x_3d = F.max_unpool3d(x_40d, indices_3, kernel_size=kernels[3], stride=2, output_size=dim_3)
+        x_32d = F.relu(self.decoder_convtr_32(x_3d))
+        x_31d = F.relu(self.decoder_convtr_31(x_32d))
+        x_30d = self.dropout(F.relu(self.decoder_convtr_30(x_31d)))
+
+        x_30d = x_30d + x_2
+        # x_30d = torch.cat((x_30d, x_2), dim=1)
+        # c_30d = nn.Sequential(*[nn.Conv3d(in_channels=x_30d.size()[1],out_channels=indices_2.size()[1],kernel_size=3,padding=1)]).to(x_30d.device)
+        # x_30d = F.relu(c_30d(x_30d))
+
+        # Decoder Stage - 3
+        x_2d = F.max_unpool3d(x_30d, indices_2, kernel_size=kernels[2], stride=2, output_size=dim_2)
+        x_22d = F.relu(self.decoder_convtr_22(x_2d))
+        x_21d = F.relu(self.decoder_convtr_21(x_22d))
+        x_20d = F.relu(self.decoder_convtr_20(x_21d))
+
+        x_20d = x_20d + x_1
+        # x_20d = torch.cat((x_20d, x_1), dim=1)
+        # c_20d = nn.Sequential(*[nn.Conv3d(in_channels=x_20d.size()[1],out_channels=indices_1.size()[1],kernel_size=3,padding=1)]).to(x_20d.device)
+        # x_20d = F.relu(c_20d(x_20d))
+
+        # Decoder Stage - 2
+        x_1d = F.max_unpool3d(x_20d, indices_1, kernel_size=kernels[1], stride=2, output_size=dim_1)
+        x_11d = F.relu(self.decoder_convtr_11(x_1d))
+        x_10d = self.dropout(F.relu(self.decoder_convtr_10(x_11d)))
+
+
+        x_10d = x_10d + x_0
+        # x_10d = torch.cat((x_10d, x_0), dim=1)
+        # c_10d = nn.Sequential(*[nn.Conv3d(in_channels=x_10d.size()[1],out_channels=indices_0.size()[1],kernel_size=3,padding=1)]).to(x_10d.device)
+        # x_10d = F.relu(c_10d(x_10d))
+
+        # Decoder Stage - 1
+        x_0d = F.max_unpool3d(x_10d, indices_0, kernel_size=kernels[0], stride=2, output_size=dim_0)
+
+        x_01d = F.relu(self.decoder_convtr_01(x_0d))
+        x_00d = self.decoder_convtr_00(x_01d)
+
+        return self.sigmoid(x_00d)
+
+class Maike_CNN3D(nn.Module):
     def __init__(self, input_channels, output_channels):
         super(CNN3D, self).__init__()
 
@@ -884,3 +1036,84 @@ class UNETR_2(nn.Module):
         #print('logits:',logits.shape)
 
         return logits
+
+class ResUnetPlusPlus(nn.Module):
+    def __init__(self, channel, filters=[32, 64, 128, 256, 512], drop_p=0.0):
+        super(ResUnetPlusPlus, self).__init__()
+
+        self.input_layer = nn.Sequential(
+            nn.Conv3d(channel, filters[0], kernel_size=7, padding=3),
+            # nn.BatchNorm3d(filters[0]),
+            nn.GroupNorm(1, filters[0]),
+            nn.ReLU(),
+            nn.Dropout3d(drop_p),
+            nn.Conv3d(filters[0], filters[0], kernel_size=7, padding=3),
+        )
+        self.input_skip = nn.Sequential(
+            nn.Conv3d(channel, filters[0], kernel_size=7, padding=3)
+        )
+
+        self.squeeze_excite1 = Squeeze_Excite_Block(filters[0], drop_p=drop_p)
+
+        self.residual_conv1 = ResidualConv(filters[0], filters[1], 2, 1, drop_p=drop_p)
+
+        self.squeeze_excite2 = Squeeze_Excite_Block(filters[1], drop_p=drop_p)
+
+        self.residual_conv2 = ResidualConv(filters[1], filters[2], 2, 1, drop_p=drop_p)
+
+        self.squeeze_excite3 = Squeeze_Excite_Block(filters[2], drop_p=drop_p)
+
+        self.residual_conv3 = ResidualConv(filters[2], filters[3], 2, 1, drop_p=drop_p)
+
+        self.aspp_bridge = ASPP(filters[3], filters[4], drop_p=drop_p)
+
+        self.attn1 = AttentionBlock(filters[2], filters[4], filters[4], drop_p=drop_p)
+        self.upsample1 = Upsample_(2)
+        self.up_residual_conv1 = ResidualConv(filters[4] + filters[2], filters[3], 1, 1, drop_p=drop_p)
+
+        self.attn2 = AttentionBlock(filters[1], filters[3], filters[3], drop_p=drop_p)
+        self.upsample2 = Upsample_(2)
+        self.up_residual_conv2 = ResidualConv(filters[3] + filters[1], filters[2], 1, 1, drop_p=drop_p)
+
+        self.attn3 = AttentionBlock(filters[0], filters[2], filters[2], drop_p=drop_p)
+        self.upsample3 = Upsample_(2)
+        self.up_residual_conv3 = ResidualConv(filters[2] + filters[0], filters[1], 1, 1, drop_p=drop_p)
+
+        self.aspp_out = ASPP(filters[1], filters[0], drop_p=drop_p)
+
+        self.output_layer = nn.Sequential(nn.Conv3d(filters[0], 1, 1), nn.Sigmoid())
+
+    def forward(self, x):
+
+        x1 = self.input_layer(x) + self.input_skip(x)
+
+        x2 = self.squeeze_excite1(x1)
+        x2 = self.residual_conv1(x2)
+
+        x3 = self.squeeze_excite2(x2)
+        x3 = self.residual_conv2(x3)
+
+        x4 = self.squeeze_excite3(x3)
+        x4 = self.residual_conv3(x4)
+
+        x5 = self.aspp_bridge(x4)
+
+        x6 = self.attn1(x3, x5)
+        x6 = self.upsample1(x6)
+        x6 = torch.cat([x6, x3], dim=1)
+        x6 = self.up_residual_conv1(x6)
+
+        x7 = self.attn2(x2, x6)
+        x7 = self.upsample2(x7)
+        x7 = torch.cat([x7, x2], dim=1)
+        x7 = self.up_residual_conv2(x7)
+
+        x8 = self.attn3(x1, x7)
+        x8 = self.upsample3(x8)
+        x8 = torch.cat([x8, x1], dim=1)
+        x8 = self.up_residual_conv3(x8)
+
+        x9 = self.aspp_out(x8)
+        out = self.output_layer(x9)
+
+        return out

@@ -52,6 +52,7 @@ message.py
 instances_clahe_1.json
 instances_clahe_2.json
 instances_clahe_old.json
+instances_test.json
 
 # Folders to ignore #
 ###################

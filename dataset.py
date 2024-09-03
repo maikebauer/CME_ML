@@ -15,17 +15,19 @@ from scipy.ndimage.measurements import label
 from scipy import ndimage
 from utils import sep_noevent_data, check_diff
 import random
+from skimage import transform
 
 class RundifSequence(Dataset):
-    def __init__(self, transform=None, mode='train', win_size=16, stride=2, width_par=128, ind_par=None):
+    def __init__(self, transform=None, mode='train', win_size=16, stride=2, width_par=128, ind_par=None, include_potential=True):
         
         rng = default_rng()
 
         self.transform = transform
         self.mode = mode
         self.width_par = width_par
+        self.include_potential = include_potential
 
-        self.coco_obj = coco.COCO("instances_clahe.json")
+        self.coco_obj = coco.COCO("instances_default.json")
         
         if ind_par is None:
             ind_par = len(self.coco_obj.getImgIds())
@@ -39,29 +41,49 @@ class RundifSequence(Dataset):
         event_list = []
         temp_list = []
 
+
         for a in range(0, len(self.img_ids)):
+
             anns = self.coco_obj.getAnnIds(imgIds=[self.img_ids[a]])
 
             if(len(anns)>0):
-                self.annotated.append(a)
-                temp_list.append(a)
+                cats = [self.coco_obj.loadAnns(anns[i]) for i in range(len(anns))]
+                attr_potential = [cats[i][0]['attributes']['potential'] for i in range(len(cats))]
 
-                if a == len(self.img_ids)-1:
-                    event_list.append(temp_list)
-                    
+                if not self.include_potential:
+                    if all(attr_potential):
+                        if len(temp_list) > 0:
+                            event_list.append(temp_list)
+
+                            temp_list = []
+                          
+                    else:
+                        self.annotated.append(a)
+                        temp_list.append(a)
+
+                        if a == len(self.img_ids)-1:
+                            event_list.append(temp_list)
+                else:
+                    self.annotated.append(a)
+                    temp_list.append(a)
+
+                    if a == len(self.img_ids)-1:
+                        event_list.append(temp_list)
             else:
                 if len(temp_list) > 0:
                     event_list.append(temp_list)
 
                     temp_list = []
-                    
+
         self.events = event_list
 
         event_ranges = []
 
         for i in range(len(self.events)):
             len_set = int(len(self.events[i])/2)
-
+            # print(i)
+            # print(self.events[i])
+            # print('-------------')
             if i == 0:
                 diff = [self.events[i][0] - 0, self.events[i+1][0] - self.events[i][-1]]
                 event_ranges.append(check_diff(diff, len_set, self.events[i]))
@@ -148,40 +170,51 @@ class RundifSequence(Dataset):
         for idx in item_ids:
             
             img_info = self.coco_obj.loadImgs([idx])[0]
-            img_file_name = img_info["file_name"].split('/')[-1]
+            img_file_name = img_info["file_name"].split('/')[-1].split('.')[0] + '.npy'
             file_names.append(img_file_name)
 
             if torch.cuda.is_available():
                 
                 if os.path.isdir('/home/mbauer/Data/'):
-                    path = "/home/mbauer/Data/differences_clahe/"
+                    path = "/home/mbauer/Data/differences_pickles/"
                 
                 elif os.path.isdir('/gpfs/data/fs72241/maibauer/'):
-                    path = "/gpfs/data/fs72241/maibauer/differences_clahe/"
+                    path = "/gpfs/data/fs72241/maibauer/differences_pickles/"
 
                 else:
                     raise FileNotFoundError('No folder with differences found. Please check path.')
                     sys.exit()
 
             else:
-                path = "/Volumes/SSD/differences_clahe/"
+                path = "/Volumes/SSD/differences_pickles/"
 
             height_par = self.width_par
 
             # Use URL to load image.
 
-            im = Image.open(path+img_file_name).convert("L")
+            im = np.load(path+img_file_name)
 
             if self.width_par != 1024:
-                im = im.resize((self.width_par , height_par))
+                im = transform.resize(im, (self.width_par , height_par), anti_aliasing=True, preserve_range=True)
 
             GT = []
             annotations = self.coco_obj.getAnnIds(imgIds=idx)
 
-            if(len(annotations)>0):
+            if (len(annotations)>0):
                 for a in annotations:
+                    
                     ann = self.coco_obj.loadAnns(a)
-                    GT.append(coco.maskUtils.decode(coco.maskUtils.frPyObjects([ann[0]['segmentation']], 1024, 1024))[:,:,0])
+                    attr_potential = ann[0]['attributes']['potential']
+
+                    if attr_potential:
+                        if self.include_potential == True:
+                            GT.append(coco.maskUtils.decode(coco.maskUtils.frPyObjects([ann[0]['segmentation']], 1024, 1024))[:,:,0])
+                        else:
+                            GT.append(np.zeros((1024,1024)))
+
+                    else:
+                        GT.append(coco.maskUtils.decode(coco.maskUtils.frPyObjects([ann[0]['segmentation']], 1024, 1024))[:,:,0])
+                        
             else:
                 GT.append(np.zeros((1024,1024)))
             
@@ -190,23 +223,31 @@ class RundifSequence(Dataset):
 
             if self.width_par != 1024:
                 GT = GT.resize((self.width_par , height_par))
-            
+
             GT = np.array(GT)/255.0
-            im = np.array(im)/255.0
 
             dilation = True
+
+            # if dilation:
+            #     k_size = int(self.width_par/64)
+            #     kernel = ndimage.generate_binary_structure(k_size, k_size)
+            #     sigma = 2
+            #     n_it = 1
+
+            #     GT = ndimage.binary_dilation(GT, structure=kernel,iterations=n_it)
+            #     GT = ndimage.gaussian_filter(GT.astype(np.float32), sigma=sigma)
 
             if dilation:
                 k_size = 2
                 kernel = ndimage.generate_binary_structure(k_size, k_size)
                 sigma = 5
                 n_it = int(self.width_par/64)
-
+                
                 GT = ndimage.binary_dilation(GT, structure=kernel,iterations=n_it)
                 GT = ndimage.gaussian_filter(GT.astype(np.float32), sigma=sigma)
 
-            im = im.astype(np.float32)
-            GT = GT.astype(np.float32)
+            # im = im.astype(np.float32)
+            # GT = GT.astype(np.float32)
 
             torch.manual_seed(seed)
             im = self.transform(im)
@@ -219,7 +260,6 @@ class RundifSequence(Dataset):
 
         GT_all = np.array(GT_all)
         im_all = np.array(im_all)
-
         return {'image':torch.tensor(im_all), 'gt':torch.tensor(GT_all), 'names':file_names}
     
     def __len__(self):
@@ -698,7 +738,7 @@ class BasicSet(Dataset):
         
         if self.width_par != 1024:
             for i in range(len(GT)):
-                GT[i] = cv2.resize(GT[i]  , (self.width_par , height_par),interpolation = cv2.INTER_CUBIC)
+                GT[i] = cv2.resize(GT[i]  , (self.width_par , height_par), interpolation = cv2.INTER_CUBIC)
 
         dilation = False
 

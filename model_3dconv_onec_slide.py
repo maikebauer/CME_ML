@@ -6,7 +6,7 @@ import sys
 import os
 from datetime import datetime
 import copy
-from models import UNETR_16, CNN3D
+from models import UNETR_16, CNN3D, ResUnetPlusPlus
 from dataset import RundifSequence
 from evaluation import evaluate_onec_slide
 from torch.utils.tensorboard import SummaryWriter
@@ -17,8 +17,8 @@ def train(backbone, ind_par):
 
     device = torch.device("cpu")
 
-    batch_size = 8
-    num_workers = 4
+    batch_size = 2
+    num_workers = 1
     width_par = 128
     aug = True
     win_size = 16
@@ -35,18 +35,18 @@ def train(backbone, ind_par):
             device = torch.device("cuda")
             #matplotlib.use('Qt5Agg')
 
-            if(torch.cuda.device_count() >1):
-                batch_size = 4
-                num_workers = 2
+            # if(torch.cuda.device_count() >1):
+            #     batch_size = 4
+            #     num_workers = 2
 
         elif os.path.isdir('/gpfs/data/fs72241/maibauer/'):
             device = torch.device("cuda")
-            batch_size = 4
-            num_workers = 2
+            # batch_size = 4
+            # num_workers = 2
 
-            if(torch.cuda.device_count() > 1):
-                batch_size = 8
-                num_workers = 4
+            # if(torch.cuda.device_count() > 1):
+            #     batch_size = 8
+            #     num_workers = 4
 
         else:
             sys.exit("Invalid data path. Exiting...")    
@@ -58,9 +58,10 @@ def train(backbone, ind_par):
         composed = v2.Compose([v2.ToTensor()])
         composed_val = v2.Compose([v2.ToTensor()])
 
-    dataset = RundifSequence(transform=composed,mode='train',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par)
-    dataset_val = RundifSequence(transform=composed_val,mode='val',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par)
-    dataset_test = RundifSequence(transform=composed_val,mode='test',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par)
+    include_potential = True
+    dataset = RundifSequence(transform=composed,mode='train',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par,include_potential=include_potential)
+    dataset_val = RundifSequence(transform=composed_val,mode='val',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par,include_potential=include_potential)
+    dataset_test = RundifSequence(transform=composed_val,mode='test',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par,include_potential=include_potential)
 
     indices_val = dataset_val.img_ids_win
     indices_test = dataset_test.img_ids_win
@@ -119,18 +120,22 @@ def train(backbone, ind_par):
         torch.manual_seed(seed) 
         model_seg = CNN3D(input_channels=1, output_channels=1)
 
+    elif backbone == 'resunetpp':
+        torch.manual_seed(seed)
+        model_seg = ResUnetPlusPlus(channel=1, drop_p=0.1)
+
     else:
         print('Invalid backbone...')
         sys.exit()
 
-    if(torch.cuda.device_count() >1):
+    if(torch.cuda.device_count() > 1):
         model_seg = torch.nn.DataParallel(model_seg)
 
     model_seg.to(device)
 
     g_optimizer_seg = optim.Adam(model_seg.parameters(),1e-5)
 
-    scheduler = optim.lr_scheduler.StepLR(g_optimizer_seg, step_size=40, gamma=0.1)
+    scheduler = optim.lr_scheduler.StepLR(g_optimizer_seg, step_size=20, gamma=0.1)
 
     num_iter = 101
 
@@ -171,7 +176,8 @@ def train(backbone, ind_par):
 
     if backbone == 'unetr':
         pixel_looser = nn.BCEWithLogitsLoss()
-    elif backbone == 'cnn3d':
+
+    elif backbone == 'cnn3d' or backbone == 'resunetpp':
         # pixel_looser = nn.BCELoss()
         pixel_looser = DiceLoss()
 
@@ -212,8 +218,7 @@ def train(backbone, ind_par):
         batch_loss = 0
         for num, data in enumerate(data_loader):
             g_optimizer_seg.zero_grad()
-            #input_data = normalize_train(data['image']).float().to(device)
-
+            
             input_data = data['image'].float().to(device)
             mask_data = data['gt'].float().to(device)
 
@@ -222,8 +227,12 @@ def train(backbone, ind_par):
                 pred_comb = model_seg(im_concat)
                 mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
 
-            elif backbone == 'cnn3d':
+            elif backbone == 'cnn3d' or backbone == 'resunetpp':
+                #norm_data_train = nn.BatchNorm3d(1).to(device)
+
                 input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
+                #input_data = norm_data_train(input_data)
+
                 mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
                 pred_comb = model_seg(input_data)
 
@@ -336,8 +345,12 @@ def evaluate(data_loader, model_seg, device, indices, pixel_looser, input_params
             mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
             input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
 
-        elif backbone == 'cnn3d':
+        elif backbone == 'cnn3d' or backbone == 'resunetpp':
+            #norm_data_val = nn.BatchNorm3d(1).to(device)
+
             input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
+            #input_data = norm_data_val(input_data)
+
             mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
             pred_comb = model_seg(input_data)
 
@@ -368,7 +381,7 @@ def evaluate(data_loader, model_seg, device, indices, pixel_looser, input_params
         for j in range(len(pred_arr)):
             if backbone == 'unetr':
                 pred_arr[j] = sigmoid(pred_arr[j].cpu().detach())
-            elif backbone == 'cnn3d':
+            elif backbone == 'cnn3d' or backbone == 'resunetpp':
                 pred_arr[j] = pred_arr[j].cpu().detach()
         
         pred_save[h] = np.nanmean(pred_arr,axis=0)
@@ -389,8 +402,8 @@ def test(model_name):
     model_path = 'Model_Train/'+ model_name + '/model_seg.pth'
     weights_path = 'Model_Train/'+ model_name + '/model_weights_seg.pth'
 
-    batch_size = 2
-    num_workers = 1
+    batch_size = 4
+    num_workers = 2
     width_par = 128
     aug = True
     win_size = 16
@@ -405,18 +418,18 @@ def test(model_name):
             device = torch.device("cuda")
             #matplotlib.use('Qt5Agg')
 
-            if(torch.cuda.device_count() >1):
-                batch_size = 4
-                num_workers = 2
+            # if(torch.cuda.device_count() >1):
+            #     batch_size = 4
+            #     num_workers = 2
 
         elif os.path.isdir('/gpfs/data/fs72241/maibauer/'):
             device = torch.device("cuda")
-            batch_size = 4
-            num_workers = 2
+            # batch_size = 4
+            # num_workers = 2
 
-            if(torch.cuda.device_count() >1):
-                batch_size = 8
-                num_workers = 4
+            # if(torch.cuda.device_count() >1):
+            #     batch_size = 8
+            #     num_workers = 4
 
         else:
             sys.exit("Invalid data path. Exiting...")    
@@ -430,7 +443,7 @@ def test(model_name):
 
     if backbone == 'unetr':
         pixel_looser = nn.BCEWithLogitsLoss()
-    elif backbone == 'cnn3d':
+    elif backbone == 'cnn3d' or backbone == 'resunetpp':
         # pixel_looser = nn.BCELoss()
         pixel_looser = DiceLoss()
 
@@ -450,13 +463,16 @@ def test(model_name):
 
     elif backbone == 'cnn3d': 
         model_seg = CNN3D(input_channels=1, output_channels=1)
+    
+    elif backbone == 'resunetpp':
+        model_seg = ResUnetPlusPlus(channel=1, drop_p=0.1)
 
     model_seg.load_state_dict(torch.load(model_path, map_location=device))
     model_seg.to(device)
 
     composed = v2.Compose([v2.ToTensor()])
 
-    dataset = RundifSequence(transform=composed,mode='test',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par)
+    dataset = RundifSequence(transform=composed,mode='test',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par,include_potential=False)
 
     data_loader = torch.utils.data.DataLoader(
                                                 dataset,

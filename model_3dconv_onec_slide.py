@@ -17,8 +17,8 @@ def train(backbone, ind_par):
 
     device = torch.device("cpu")
 
-    batch_size = 2
-    num_workers = 1
+    batch_size = 4
+    num_workers = 2
     width_par = 128
     aug = True
     win_size = 16
@@ -58,7 +58,7 @@ def train(backbone, ind_par):
         composed = v2.Compose([v2.ToTensor()])
         composed_val = v2.Compose([v2.ToTensor()])
 
-    include_potential = True
+    include_potential = False
     dataset = RundifSequence(transform=composed,mode='train',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par,include_potential=include_potential)
     dataset_val = RundifSequence(transform=composed_val,mode='val',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par,include_potential=include_potential)
     dataset_test = RundifSequence(transform=composed_val,mode='test',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par,include_potential=include_potential)
@@ -135,7 +135,7 @@ def train(backbone, ind_par):
 
     g_optimizer_seg = optim.Adam(model_seg.parameters(),1e-5)
 
-    scheduler = optim.lr_scheduler.StepLR(g_optimizer_seg, step_size=20, gamma=0.1)
+    # scheduler = optim.lr_scheduler.StepLR(g_optimizer_seg, step_size=20, gamma=0.1)
 
     num_iter = 101
 
@@ -297,7 +297,7 @@ def train(backbone, ind_par):
 
             print(f"Epoch: {epoch:.0f}, Loss: {epoch_loss:.10f}, Val Loss: {epoch_loss_val:.10f}, Test Loss: {epoch_loss_test:.10f}, No improvement in {num_no_improvement:.0f} epochs.")
         
-        scheduler.step()
+        # scheduler.step()
 
     sum_writer.close()
 

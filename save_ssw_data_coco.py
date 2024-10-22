@@ -37,6 +37,7 @@ def binary_mask_to_rle_np(binary_mask):
 my_year = 2012
 my_month_min = 1
 my_month_max = 6
+my_day_min = 1
 
 path_rdifs = '/home/mbauer/Data/stereo_processed/running_difference/data/A/'
 path = '/home/mbauer/Data/SSW_Data/'
@@ -85,11 +86,9 @@ coco_data = {
 
 t = 0.25
 
-ind_list = df[(df['date_obs'].dt.year == 2012) & (df['date_obs'].dt.month <= 6)].index.values
 ssw_date_prev = None
 
-file_list = sorted(glob.glob(png_path+'*.png'))
-file_days = np.unique([file.split('/')[-1].split('.')[0].split('_')[0] for file in file_list])
+file_days = pd.date_range(start='2012-06-13', end='2012-06-30').strftime('%Y%m%d').values
 
 # Calculate the start time
 
@@ -134,7 +133,6 @@ for fdate in file_days:
         }
 
         coco_data["images"].append(image_info)
-        image_id = image_id + 1
 
         if len(df_temp) == 0:
             continue
@@ -229,3 +227,15 @@ for fdate in file_days:
 
         with open(filename, 'w') as f:
             json.dump(coco_data, f)
+
+    image_id = image_id + 1
+    
+filename = 'cme_coco_annotations_rle.json'
+
+try:
+    os.remove(filename)
+except OSError:
+    pass
+
+with open(filename, 'w') as f:
+    json.dump(coco_data, f)

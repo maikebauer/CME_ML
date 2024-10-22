@@ -147,6 +147,7 @@ def train(backbone, ind_par):
 
     folder_path = "run_"+dt_string+"_model_"+str(dataset.ind_par)+"_"+backbone_name+'/'
     train_path = 'Model_Train/'+folder_path
+    
     # im_path = train_path+'images/'
 
     # cme_count = 0
@@ -363,7 +364,7 @@ def evaluate(data_loader, model_seg, device, indices, pixel_looser, input_params
         for b in range(mask_data.shape[0]):
             for k in range(win_size):
                 current_ind = ind_dict[indices[num_batch][k]]
-                pred_save[current_ind].append(pred_comb[b,0,k,:,:])
+                pred_save[current_ind].append(pred_comb[b,0,k,:,:].cpu().detach().numpy())
 
                 if np.all(input_imgs[current_ind]) == 0:
                     input_imgs[current_ind] = input_data[b,0,k,:,:].cpu().detach().numpy()
@@ -382,7 +383,7 @@ def evaluate(data_loader, model_seg, device, indices, pixel_looser, input_params
             if backbone == 'unetr':
                 pred_arr[j] = sigmoid(pred_arr[j].cpu().detach())
             elif backbone == 'cnn3d' or backbone == 'resunetpp':
-                pred_arr[j] = pred_arr[j].cpu().detach()
+                pred_arr[j] = pred_arr[j]
         
         pred_save[h] = np.nanmean(pred_arr,axis=0)
 

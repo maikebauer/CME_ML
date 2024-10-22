@@ -16,6 +16,7 @@ from scipy import ndimage
 from utils import sep_noevent_data, check_diff
 import random
 from skimage import transform
+import datetime
 
 class RundifSequence(Dataset):
     def __init__(self, transform=None, mode='train', win_size=16, stride=2, width_par=128, ind_par=None, include_potential=True):
@@ -39,12 +40,13 @@ class RundifSequence(Dataset):
         self.events = []
 
         event_list = []
+        time_list = {}
         temp_list = []
-
 
         for a in range(0, len(self.img_ids)):
 
             anns = self.coco_obj.getAnnIds(imgIds=[self.img_ids[a]])
+            time_list[a] = datetime.datetime.strptime(self.coco_obj.loadImgs([self.img_ids[a]])[0]['file_name'].split('/')[-1][:15], '%Y%m%d_%H%M%S')
 
             if(len(anns)>0):
                 cats = [self.coco_obj.loadAnns(anns[i]) for i in range(len(anns))]
@@ -54,7 +56,6 @@ class RundifSequence(Dataset):
                     if all(attr_potential):
                         if len(temp_list) > 0:
                             event_list.append(temp_list)
-
                             temp_list = []
                           
                     else:
@@ -81,21 +82,26 @@ class RundifSequence(Dataset):
 
         for i in range(len(self.events)):
             len_set = int(len(self.events[i])/2)
-            # print(i)
-            # print(self.events[i])
-            # print('-------------')
+
+            if len(self.events[i]) < win_size/2:
+                len_set = int(win_size/2 - len_set)
+
             if i == 0:
                 diff = [self.events[i][0] - 0, self.events[i+1][0] - self.events[i][-1]]
-                event_ranges.append(check_diff(diff, len_set, self.events[i]))
+                event_ranges.append(check_diff(diff, len_set, self.events[i], time_list, win_size))
 
             elif i == len(self.events)-1:
                 diff = [self.events[i][0] - event_ranges[i-1][-1], (self.img_ids[-1]-1) - self.events[i][-1]]
-                event_ranges.append(check_diff(diff, len_set, self.events[i]))
+
+                if diff[1] == 0:
+                    diff[1] = 2
+
+                event_ranges.append(check_diff(diff, len_set, self.events[i], time_list, win_size))
 
             else:
                 diff = [self.events[i][0] - event_ranges[i-1][-1], self.events[i+1][0] - self.events[i][-1]]
-                event_ranges.append(check_diff(diff, len_set, self.events[i]))
-        
+                event_ranges.append(check_diff(diff, len_set, self.events[i], time_list, win_size))
+                    
         len_train = int(len(event_ranges)*0.7)
         len_test = int(len(event_ranges)*0.2)
         len_val = int(len(event_ranges))-(len_train+len_test)
@@ -120,6 +126,14 @@ class RundifSequence(Dataset):
         set_val = [np.array(event_ranges[i])+1 for i in val_ind]
 
         train_paired_idx = []
+
+        # for i in range(len(set_train)):
+        #     if len(set_train[i]) < win_size:
+        #         print('i=',i)
+        #         print('len_set=',len(set_train[i]))
+        #         print(set_train[i])
+        #         print(time_list[set_train[i][0]])
+        #         print('#####################')
 
         for i in range(len(set_train)):
             train_paired_idx.append(np.lib.stride_tricks.sliding_window_view(set_train[i],win_size)[::stride, :])
@@ -238,13 +252,13 @@ class RundifSequence(Dataset):
             #     GT = ndimage.gaussian_filter(GT.astype(np.float32), sigma=sigma)
 
             if dilation:
-                k_size = 2
-                kernel = ndimage.generate_binary_structure(k_size, k_size)
-                sigma = 5
+                # k_size = 2
+                kernel = disk(2)
+                #sigma = 5
                 n_it = int(self.width_par/64)
                 
-                GT = ndimage.binary_dilation(GT, structure=kernel,iterations=n_it)
-                GT = ndimage.gaussian_filter(GT.astype(np.float32), sigma=sigma)
+                GT = ndimage.binary_dilation(GT, structure=kernel, iterations=n_it)
+                #GT = ndimage.gaussian_filter(GT.astype(np.float32), sigma=sigma)
 
             # im = im.astype(np.float32)
             # GT = GT.astype(np.float32)

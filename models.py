@@ -1042,15 +1042,15 @@ class ResUnetPlusPlus(nn.Module):
         super(ResUnetPlusPlus, self).__init__()
 
         self.input_layer = nn.Sequential(
-            nn.Conv3d(channel, filters[0], kernel_size=7, padding=3),
+            nn.Conv3d(channel, filters[0], kernel_size=3, padding=1),
             # nn.BatchNorm3d(filters[0]),
             nn.GroupNorm(1, filters[0]),
             nn.ReLU(),
             nn.Dropout3d(drop_p),
-            nn.Conv3d(filters[0], filters[0], kernel_size=7, padding=3),
+            nn.Conv3d(filters[0], filters[0], kernel_size=3, padding=1),
         )
         self.input_skip = nn.Sequential(
-            nn.Conv3d(channel, filters[0], kernel_size=7, padding=3)
+            nn.Conv3d(channel, filters[0], kernel_size=3, padding=1)
         )
 
         self.squeeze_excite1 = Squeeze_Excite_Block(filters[0], drop_p=drop_p)

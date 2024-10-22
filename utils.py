@@ -2,6 +2,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
+import sys
 
 def get_mean_std(loader):
     # Compute the mean and standard deviation of all pixels in the dataset
@@ -106,20 +107,86 @@ def calc_kernel(inp_size, kernel_size, depth):
 
     return kernels
 
-def check_diff(diff, len_set, evs):
+def check_diff(diff, len_set, evs, time_dict, win_size):
     
+    flg_bef = 0
+    flg_aft = 0
+
     if (diff[0] > len_set) and (diff[1] > len_set):
+        cs = 1
         ev_ran = np.arange(evs[0]-len_set,evs[-1]+len_set)
 
     elif (diff[0] > len_set) and (diff[1] <= len_set):
+        cs = 2
         ev_ran = np.arange(evs[0]-len_set,evs[-1]+diff[1]-1)
 
     elif (diff[0] <= len_set) and (diff[1] > len_set):
+        cs = 3
         ev_ran = np.arange(evs[0]-diff[0]+1,evs[-1]+len_set)
 
     elif (diff[0] <= len_set) and (diff[1] <= len_set):
+        cs = 4
         ev_ran = np.arange(evs[0]-diff[0]+1,evs[-1]+diff[1]-1)
     else:
         print('Error')
+
+    min_ind = np.where(ev_ran == evs[0])[0][0]
+    max_ind = np.where(ev_ran == evs[-1])[0][0]
+
+    for i in range(min_ind, 0, -1):
+        tdiff = time_dict[ev_ran[i]] - time_dict[ev_ran[i-1]]
+
+        if np.abs(tdiff.seconds)/60 > 3.5*40:
+            flg_bef = 1
+            ev_ran = ev_ran[i:]
+            break
+    
+    for i in range(max_ind, len(ev_ran)-1):
+        tdiff = time_dict[ev_ran[i+1]] - time_dict[ev_ran[i]]
+
+        if np.abs(tdiff.seconds)/60 > 3.5*40:
+            flg_aft = 1
+            ev_ran = ev_ran[:i+1]
+            break
+    
+    if len(ev_ran) < win_size:
+        if flg_bef and (cs == 2 or cs == 4):
+            print('Error: flg_bef = {}, cs = {}'.format(flg_bef, cs))
+            sys.exit()
+        elif flg_aft and (cs == 3 or cs == 4):
+            print('Error: flg_aft = {}, cs = {}'.format(flg_aft, cs))
+            sys.exit()
+        elif flg_bef and flg_aft:
+            print('Error: flg_bef = {}, flg_aft = {}'.format(flg_bef, flg_aft))
+            sys.exit()
+        elif flg_bef and (cs == 1 or cs == 3):
+            # print('Error: flg_bef = {}, cs = {}'.format(flg_bef, cs))
+            # print('Fixing')
+            ev_ran = np.arange(ev_ran[0],ev_ran[-1]+len_set)
+
+            max_ind = np.where(ev_ran == evs[-1])[0][0]
+            
+            for i in range(max_ind, len(ev_ran)-1):
+                tdiff = time_dict[ev_ran[i+1]] - time_dict[ev_ran[i]]
+
+                if np.abs(tdiff.seconds)/60 > 3.5*40:
+                    flg_aft = 1
+                    ev_ran = ev_ran[:i+1]
+                    break
+        
+        elif flg_aft and (cs == 1 or cs == 2):
+            # print('Error: flg_aft = {}, cs = {}'.format(flg_aft, cs))
+            # print('Fixing')
+            ev_ran = np.arange(ev_ran[0]-2*len_set,ev_ran[-1])
+
+            min_ind = np.where(ev_ran == evs[0])[0][0]
+
+            for i in range(min_ind, 0, -1):
+                tdiff = time_dict[ev_ran[i]] - time_dict[ev_ran[i-1]]
+
+                if np.abs(tdiff.seconds)/60 > 3.5*40:
+                    flg_bef = 1
+                    ev_ran = ev_ran[i:]
+                    break
 
     return ev_ran

@@ -19,7 +19,7 @@ from skimage import transform
 import datetime
 
 class RundifSequence(Dataset):
-    def __init__(self, transform=None, mode='train', win_size=16, stride=2, width_par=128, ind_par=None, include_potential=True):
+    def __init__(self, transform=None, mode='train', win_size=16, stride=2, width_par=128, ind_par=None, include_potential=True, include_potential_gt=False):
         
         rng = default_rng()
 
@@ -27,6 +27,7 @@ class RundifSequence(Dataset):
         self.mode = mode
         self.width_par = width_par
         self.include_potential = include_potential
+        self.include_potential_gt = include_potential_gt
 
         self.coco_obj = coco.COCO("instances_default.json")
         
@@ -221,7 +222,7 @@ class RundifSequence(Dataset):
                     attr_potential = ann[0]['attributes']['potential']
 
                     if attr_potential:
-                        if self.include_potential == True:
+                        if self.include_potential_gt == True:
                             GT.append(coco.maskUtils.decode(coco.maskUtils.frPyObjects([ann[0]['segmentation']], 1024, 1024))[:,:,0])
                         else:
                             GT.append(np.zeros((1024,1024)))
@@ -242,26 +243,11 @@ class RundifSequence(Dataset):
 
             dilation = True
 
-            # if dilation:
-            #     k_size = int(self.width_par/64)
-            #     kernel = ndimage.generate_binary_structure(k_size, k_size)
-            #     sigma = 2
-            #     n_it = 1
-
-            #     GT = ndimage.binary_dilation(GT, structure=kernel,iterations=n_it)
-            #     GT = ndimage.gaussian_filter(GT.astype(np.float32), sigma=sigma)
-
             if dilation:
-                # k_size = 2
                 kernel = disk(2)
-                #sigma = 5
                 n_it = int(self.width_par/64)
                 
                 GT = ndimage.binary_dilation(GT, structure=kernel, iterations=n_it)
-                #GT = ndimage.gaussian_filter(GT.astype(np.float32), sigma=sigma)
-
-            # im = im.astype(np.float32)
-            # GT = GT.astype(np.float32)
 
             torch.manual_seed(seed)
             im = self.transform(im)

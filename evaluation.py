@@ -168,7 +168,7 @@ def evaluate_basic(pred, gt, img, model_name, folder_path, data_num, epoch=None)
 
     return metrics
 
-def evaluate_onec_slide(pred, gt, thresh=0.1):
+def evaluate_onec_slide(pred, gt, thresh=0.5):
 
     metrics = []
 
@@ -178,11 +178,6 @@ def evaluate_onec_slide(pred, gt, thresh=0.1):
 
         gt_win = gt[p].copy()
         mask_pred = res.copy()
-
-        #compute binary mask for the CME, this is where you can add more processing (removing things behind front...)
-        
-        mask_pred[mask_pred >= thresh] = 1
-        mask_pred[mask_pred < thresh] = 0
 
         gt_win[gt_win >= thresh] = 1
         gt_win[gt_win < thresh] = 0

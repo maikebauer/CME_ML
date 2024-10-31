@@ -126,6 +126,10 @@ class RundifSequence(Dataset):
         set_test = [np.array(event_ranges[i])+1 for i in test_ind]
         set_val = [np.array(event_ranges[i])+1 for i in val_ind]
 
+        self.set_train = set_train
+        self.set_test = set_test
+        self.set_val = set_val
+        
         train_paired_idx = []
 
         # for i in range(len(set_train)):

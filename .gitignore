@@ -53,6 +53,8 @@ instances_clahe_1.json
 instances_clahe_2.json
 instances_clahe_old.json
 instances_test.json
+compare_ssw_cnn.py
+ssw_coco_annotations.json
 
 # Folders to ignore #
 ###################
@@ -69,3 +71,4 @@ Model_Movies/
 __pycache__/
 runs/
 Old_Runs/
+compare_ssw_cnn_copy.py

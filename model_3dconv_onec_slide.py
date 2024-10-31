@@ -135,7 +135,7 @@ def train(backbone, ind_par):
     g_optimizer_seg = optim.Adam(model_seg.parameters(),1e-5)
 
     # scheduler = optim.lr_scheduler.StepLR(g_optimizer_seg, step_size=20, gamma=0.1)
-    # scheduler = optim.lr_scheduler.ReduceLROnPlateau(g_optimizer_seg, mode='min', factor=0.1, patience=5)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(g_optimizer_seg, mode='min', factor=0.1, patience=5)
 
     num_iter = 101
 
@@ -152,8 +152,8 @@ def train(backbone, ind_par):
         pixel_looser = nn.BCEWithLogitsLoss()
 
     elif backbone == 'cnn3d' or backbone == 'resunetpp':
-        # pixel_looser = nn.BCELoss()
-        pixel_looser = DiceLoss()
+        pixel_looser = nn.BCELoss()
+        # pixel_looser = DiceLoss()
 
     os.makedirs(os.path.dirname(train_path), exist_ok=True)
     #os.makedirs(os.path.dirname(im_path), exist_ok=True)
@@ -207,7 +207,7 @@ def train(backbone, ind_par):
                 mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
                 pred_comb = model_seg(input_data)
 
-                gauss = False
+                gauss = True
 
                 if gauss:
                     mask_data_gauss = mask_data.detach().clone()
@@ -216,7 +216,7 @@ def train(backbone, ind_par):
                     for i in range(mask_data_gauss.shape[0]):
                         for j in range(mask_data_gauss.shape[2]):
                             mask_data_gauss[i,0,j,:,:] = gauss_blur(mask_data_gauss[i,:,j,:,:])
-
+                            mask_data_gauss[i,0,j,:,:] = torch.where(mask_data_gauss[i,0,j,:,:] > 1, 1, mask_data_gauss[i,0,j,:,:])
             else:
                 print('Invalid backbone...')
                 sys.exit()
@@ -304,7 +304,7 @@ def train(backbone, ind_par):
 
             print(f"Epoch: {epoch:.0f}, Loss: {epoch_loss:.10f}, Val Loss: {epoch_loss_val:.10f}, No improvement in {num_no_improvement:.0f} epochs.")
         
-        # scheduler.step(epoch_loss_val)
+        scheduler.step(epoch_loss_val)
 
     sum_writer.close()
 
@@ -403,8 +403,8 @@ def test(model_name, thresh=0.5):
         pixel_looser = nn.BCEWithLogitsLoss()
 
     elif backbone == 'cnn3d' or backbone == 'resunetpp':
-        # pixel_looser = nn.BCELoss()
-        pixel_looser = DiceLoss()
+        pixel_looser = nn.BCELoss()
+        # pixel_looser = DiceLoss()
 
     if backbone == 'unetr':
         model_seg = UNETR_16(in_channels=1,

@@ -1,0 +1,77 @@
+---
+dataset:
+  data_path: "/path/to/data/"
+  annotation_path: "/path/to/annotation.json"
+  height: 128
+  width: 128
+  win_size: 16
+  stride: 2
+  quick_run: false
+
+model:
+  model_path: "/path/to/code/"
+  name: "cnn3d"
+  model_parameters:
+    input_channels: 1
+    output_channels: 1
+    final_layer: Sigmoid
+  final_layer: Sigmoid
+  device: cuda
+  seed: 42
+
+optimizer:
+  name: AdamW
+  optimizer_parameters:
+    lr: 1.0e-06
+    weight_decay: 0.01
+
+scheduler:
+  use_scheduler: false
+  name: ReduceLROnPlateau
+  scheduler_parameters:
+    mode: min
+    factor: 0.1
+    patience: 10
+
+loss:
+  name: AsymmetricUnifiedFocalLoss
+  loss_parameters:
+    weight: 0.5
+    delta: 0.6
+    gamma: 0.5
+
+train:
+  batch_size: 4
+  num_workers: 2
+  epochs: 200
+  include_potential: false
+  include_potential_gt: false
+  data_parallel: true
+  shuffle: true
+  binary_gt: true
+  threshold_iou: 0.9
+  data_augmentation:
+  - name: ToTensor
+  - name: RandomHorizontalFlip
+    p: 0.5
+  - name: RandomVerticalFlip
+    p: 0.5
+  load_checkpoint:
+    load_model: false
+    load_optimizer: false
+    checkpoint_path: "/path/to/checkpoint.pth"
+    updated_lr: 1.0e-05
+
+evaluate:
+  include_potential: false
+  include_potential_gt: false
+  shuffle: false
+  binary_gt: true
+
+test:
+  model_path: "/path/to/model.pth"
+  include_potential: false
+  include_potential_gt: false
+  shuffle: false
+  binary_gt: true
+  threshold_iou: 0.9

@@ -173,7 +173,7 @@ def evaluate_onec_slide(pred, gt, thresh=0.5):
     metrics = []
 
     # plot_num = 0
-
+    
     for p, res in enumerate(pred):
 
         gt_win = gt[p].copy()
@@ -181,6 +181,9 @@ def evaluate_onec_slide(pred, gt, thresh=0.5):
 
         gt_win[gt_win >= thresh] = 1
         gt_win[gt_win < thresh] = 0
+        
+        mask_pred[mask_pred >= thresh] = 1
+        mask_pred[mask_pred < thresh] = 0
         
         #computing metrics
         kapa = Kappa_cohen(mask_pred,gt_win) ## kinda accuracy but for masks with a lot of background and small mask areas

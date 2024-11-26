@@ -72,3 +72,4 @@ __pycache__/
 runs/
 Old_Runs/
 compare_ssw_cnn_copy.py
+config.yaml

@@ -19,7 +19,7 @@ from skimage import transform
 import datetime
 
 class RundifSequence(Dataset):
-    def __init__(self, transform=None, mode='train', win_size=16, stride=2, width_par=128, ind_par=None, include_potential=True, include_potential_gt=False):
+    def __init__(self, data_path, annotation_path, transform=None, mode='train', win_size=16, stride=2, width_par=128, include_potential=True, include_potential_gt=False, quick_run=False):
         
         rng = default_rng()
 
@@ -28,14 +28,13 @@ class RundifSequence(Dataset):
         self.width_par = width_par
         self.include_potential = include_potential
         self.include_potential_gt = include_potential_gt
+        self.quick_run = quick_run
+        self.annotation_path = annotation_path
+        self.data_path = data_path
 
-        self.coco_obj = coco.COCO("instances_default.json")
+        self.coco_obj = coco.COCO(self.annotation_path)
         
-        if ind_par is None:
-            ind_par = len(self.coco_obj.getImgIds())
-        
-        self.ind_par = ind_par
-        self.img_ids = self.coco_obj.getImgIds()[:ind_par]
+        self.img_ids = self.coco_obj.getImgIds()
 
         self.annotated = []
         self.events = []
@@ -43,7 +42,7 @@ class RundifSequence(Dataset):
         event_list = []
         time_list = {}
         temp_list = []
-
+        
         for a in range(0, len(self.img_ids)):
 
             anns = self.coco_obj.getAnnIds(imgIds=[self.img_ids[a]])
@@ -124,6 +123,19 @@ class RundifSequence(Dataset):
         
         set_train = [np.array(event_ranges[i])+1 for i in train_ind]
         set_test = [np.array(event_ranges[i])+1 for i in test_ind]
+
+        for i, ran in enumerate(set_test):
+        
+            if 3880 in ran:
+                ran = np.delete(ran, np.where(ran == 3880))
+            if 3881 in ran:
+                ran = np.delete(ran, np.where(ran == 3881))
+
+            if 3882 in ran:
+                ran = np.delete(ran, np.where(ran == 3882))
+
+            set_test[i] = ran
+            
         set_val = [np.array(event_ranges[i])+1 for i in val_ind]
 
         self.set_train = set_train
@@ -131,14 +143,6 @@ class RundifSequence(Dataset):
         self.set_val = set_val
         
         train_paired_idx = []
-
-        # for i in range(len(set_train)):
-        #     if len(set_train[i]) < win_size:
-        #         print('i=',i)
-        #         print('len_set=',len(set_train[i]))
-        #         print(set_train[i])
-        #         print(time_list[set_train[i][0]])
-        #         print('#####################')
 
         for i in range(len(set_train)):
             train_paired_idx.append(np.lib.stride_tricks.sliding_window_view(set_train[i],win_size)[::stride, :])
@@ -172,6 +176,10 @@ class RundifSequence(Dataset):
         else:
             sys.exit('Invalid mode. Specifiy either train, val, or test.')
 
+        if self.quick_run:
+            #self.img_ids_win = self.img_ids_win[:int(len(self.img_ids_win)/8)]
+            self.img_ids_win = self.img_ids_win[:10]
+
         self.win_train = sorted(set(np.array([item for inner_list in train_paired_idx for item in inner_list]).flatten()))
         self.win_val = sorted(set(np.array([item for inner_list in val_paired_idx for item in inner_list]).flatten()))
         self.win_test = sorted(set(np.array([item for inner_list in test_paired_idx for item in inner_list]).flatten()))
@@ -192,26 +200,11 @@ class RundifSequence(Dataset):
             img_file_name = img_info["file_name"].split('/')[-1].split('.')[0] + '.npy'
             file_names.append(img_file_name)
 
-            if torch.cuda.is_available():
-                
-                if os.path.isdir('/home/mbauer/Data/'):
-                    path = "/home/mbauer/Data/differences_pickles/"
-                
-                elif os.path.isdir('/gpfs/data/fs72241/maibauer/'):
-                    path = "/gpfs/data/fs72241/maibauer/differences_pickles/"
-
-                else:
-                    raise FileNotFoundError('No folder with differences found. Please check path.')
-                    sys.exit()
-
-            else:
-                path = "/Volumes/SSD/differences_pickles/"
-
             height_par = self.width_par
 
             # Use URL to load image.
 
-            im = np.load(path+img_file_name)
+            im = np.load(self.data_path+img_file_name)
 
             if self.width_par != 1024:
                 im = transform.resize(im, (self.width_par , height_par), anti_aliasing=True, preserve_range=True)

@@ -6,7 +6,6 @@ import sys
 import os
 from datetime import datetime
 import copy
-from models import UNETR_16, CNN3D, ResUnetPlusPlus
 from dataset import RundifSequence
 from evaluation import evaluate_onec_slide
 from torch.utils.tensorboard import SummaryWriter
@@ -15,75 +14,43 @@ from monai.losses.dice import DiceLoss
 import io
 import matplotlib.pyplot as plt
 from torchvision.transforms import GaussianBlur
+from utils import image_grid, parse_yml, load_augmentations, load_model, load_optimizer, load_scheduler, load_loss
+import yaml
+import shutil
 
-def image_grid(images):
-    """
-    Plots a grid of images.
-    Args:
-        images (list or np.array): List or array of images to plot.
-    """
-    # Create a figure to contain the plot.
-    figure = plt.figure(figsize=(16, 16))
-    for i in range(len(images)):
-        # Start next subplot.
-        ax = plt.subplot(8, 8, i + 1)
-        plt.xticks([])
-        plt.yticks([])
-        plt.grid(False)
-        plt.tight_layout()
+def train():
 
-        if i < 16:
-            plt.imshow(images[i], cmap='gray', vmin=np.median(images[i])-np.std(images[i]), vmax=np.median(images[i])+np.std(images[i]))
-        else:
-            plt.imshow(images[i], cmap='gray')
+    mode = 'train'
 
-    return figure
+    config = parse_yml('config.yaml')
 
-def train(backbone, ind_par):
+    device = config['model']['device']
+    batch_size = config['train']['batch_size']
+    num_workers = config['train']['num_workers']
+    width_par = config['dataset']['width']
 
-    device = torch.device("cpu")
+    win_size = config['dataset']['win_size']
+    stride = config['dataset']['stride']
+    thresh = config['train']['threshold_iou']  
 
-    batch_size = 4
-    num_workers = 2
-    width_par = 128
-    aug = True
-    win_size = 16
-    stride = int(2)
-    thresh = 0.5
+    backbone = config['model']['name']
+    data_parallel = config['train']['data_parallel']
 
-    input_params = {'width_par': width_par, 'win_size': win_size, 'backbone': backbone}
+    composed = load_augmentations(config)
+    composed_val = v2.Compose([v2.ToTensor()])
 
-    if(torch.backends.mps.is_available()):
-        device = torch.device("mps")
-        #matplotlib.use('Qt5Agg')
+    quick_run = config['dataset']['quick_run']
 
-    elif(torch.cuda.is_available()):
-        if os.path.isdir('/home/mbauer/Data/'):
-            device = torch.device("cuda")
-            #matplotlib.use('Qt5Agg')
+    data_path = config['dataset']['data_path']
+    annotation_path = config['dataset']['annotation_path']
 
-        elif os.path.isdir('/gpfs/data/fs72241/maibauer/'):
-            device = torch.device("cuda")
-
-        else:
-            sys.exit("Invalid data path. Exiting...")    
-
-    if aug == True:
-        composed = v2.Compose([v2.ToTensor(), v2.RandomHorizontalFlip(p=0.5), v2.RandomVerticalFlip(p=0.5)])#, v2.RandomAutocontrast(p=0.25), v2.RandomEqualize(p=0.25), v2.RandomPhotometricDistort(p=0.25)])
-        composed_val = v2.Compose([v2.ToTensor()])
-    else:
-        composed = v2.Compose([v2.ToTensor()])
-        composed_val = v2.Compose([v2.ToTensor()])
-
-    include_potential = False
-    include_potential_gt = False
-    dataset = RundifSequence(transform=composed,mode='train',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par,include_potential=include_potential,include_potential_gt=include_potential_gt)
-    dataset_val = RundifSequence(transform=composed_val,mode='val',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par,include_potential=include_potential,include_potential_gt=include_potential_gt)
+    dataset = RundifSequence(data_path=data_path,annotation_path=annotation_path,transform=composed,mode='train',win_size=win_size,stride=stride,width_par=width_par,include_potential=config['train']['include_potential'],include_potential_gt=config['train']['include_potential_gt'],quick_run=quick_run)
+    dataset_val = RundifSequence(data_path=data_path,annotation_path=annotation_path,transform=composed_val,mode='val',win_size=win_size,stride=stride,width_par=width_par,include_potential=config['evaluate']['include_potential'],include_potential_gt=config['evaluate']['include_potential_gt'],quick_run=quick_run)
 
     data_loader = torch.utils.data.DataLoader(
                                                 dataset,
                                                 batch_size=batch_size,
-                                                shuffle=True,
+                                                shuffle=config['train']['shuffle'],
                                                 num_workers=num_workers,
                                                 pin_memory=False
                                             )
@@ -92,52 +59,36 @@ def train(backbone, ind_par):
         
                                                 dataset_val,
                                                 batch_size=batch_size,
-                                                shuffle=False,
+                                                shuffle=config['evaluate']['shuffle'],
                                                 num_workers=num_workers,
                                                 pin_memory=False
                                             )
     
-    backbone_name = '3dconv_' + backbone
-    seed = 42
+    model_seg = load_model(config, mode)
 
-    if backbone == 'unetr':
-        torch.manual_seed(seed)
-        model_seg = UNETR_16(in_channels=1,
-        out_channels=1,
-        img_size=(width_par, width_par, win_size),
-        feature_size=32,
-        hidden_size=768,
-        mlp_dim=3072,
-        num_heads=12,
-        pos_embed='perceptron',
-        norm_name='instance',
-        conv_block=True,
-        res_block=True,
-        dropout_rate=0.0)
-
-    elif backbone == 'cnn3d':
-        torch.manual_seed(seed) 
-        model_seg = CNN3D(input_channels=1, output_channels=1)
-
-    elif backbone == 'resunetpp':
-        torch.manual_seed(seed)
-        model_seg = ResUnetPlusPlus(channel=1, drop_p=0.1)
+    if config['train']['load_checkpoint']['load_model']:
+        checkpoint = torch.load(config['train']['load_checkpoint']['checkpoint_path'], weights_only=True)
+        last_epoch = checkpoint['epoch']
 
     else:
-        print('Invalid backbone...')
-        sys.exit()
+        last_epoch = -1
 
-    if(torch.cuda.device_count() > 1):
+    if data_parallel:
         model_seg = torch.nn.DataParallel(model_seg)
-
+    
     model_seg.to(device)
 
-    g_optimizer_seg = optim.Adam(model_seg.parameters(),1e-5)
+    g_optimizer_seg = load_optimizer(config, model_seg.parameters())
 
-    # scheduler = optim.lr_scheduler.StepLR(g_optimizer_seg, step_size=20, gamma=0.1)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(g_optimizer_seg, mode='min', factor=0.1, patience=5)
+    print(f"Initial learning rate: {g_optimizer_seg.param_groups[0]['lr']:.8f}")    
 
-    num_iter = 101
+    if config['scheduler']['use_scheduler']:
+        scheduler = load_scheduler(config, g_optimizer_seg)
+
+    else:
+        scheduler = None
+
+    num_iter = config['train']['epochs']
 
     optimizer_data = []
     optimizer_data_val = []
@@ -145,18 +96,11 @@ def train(backbone, ind_par):
     now = datetime.now()
     dt_string = now.strftime("%d%m%Y_%H%M%S")
 
-    folder_path = "run_"+dt_string+"_model_"+str(dataset.ind_par)+"_"+backbone_name+'/'
-    train_path = 'Model_Train/'+folder_path
-    
-    if backbone == 'unetr':
-        pixel_looser = nn.BCEWithLogitsLoss()
-
-    elif backbone == 'cnn3d' or backbone == 'resunetpp':
-        pixel_looser = nn.BCELoss()
-        # pixel_looser = DiceLoss()
-
+    folder_path = "run_"+dt_string+"_model_"+backbone+"/"
+    train_path = config['model']['model_path']+"Model_Train/"+folder_path
     os.makedirs(os.path.dirname(train_path), exist_ok=True)
-    #os.makedirs(os.path.dirname(im_path), exist_ok=True)
+
+    pixel_looser = load_loss(config)
 
     train_list_ind = [l.tolist() for l in dataset.img_ids_win]
     val_list_ind = [l.tolist() for l in dataset_val.img_ids_win]
@@ -168,25 +112,26 @@ def train(backbone, ind_par):
     with open(train_path+"indices.json", "w") as f:
         json.dump(data_indices, f)
 
-    best_loss = 1e99
+    shutil.copy("config.yaml", train_path+"config.yaml")
+
+    best_iou = -1e99
     num_no_improvement = 0
 
     log_dir = "runs/" + folder_path[:-1]
 
     sum_writer = SummaryWriter(log_dir)
+    sigmoid = nn.Sigmoid()
 
     metrics_batch = []
 
-    for epoch in range(num_iter):
+    for epoch in range(last_epoch+1, last_epoch+1+num_iter+1):
         model_seg.train()
 
         epoch_loss = 0
         epoch_loss_val = 0
 
-        model_name = "model_epoch_{}".format(epoch)
-        save_metrics = []
-
         batch_loss = 0
+
         for num, data in enumerate(data_loader):
             g_optimizer_seg.zero_grad()
             
@@ -198,18 +143,12 @@ def train(backbone, ind_par):
                 pred_comb = model_seg(im_concat)
                 mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
 
-            elif backbone == 'cnn3d' or backbone == 'resunetpp':
-                #norm_data_train = nn.BatchNorm3d(1).to(device)
-
+            elif backbone == 'cnn3d' or backbone == 'resunetpp' or backbone == 'maike_cnn3d':
                 input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
-                #input_data = norm_data_train(input_data)
-
                 mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
                 pred_comb = model_seg(input_data)
 
-                gauss = True
-
-                if gauss:
+                if config['train']['binary_gt'] == False:
                     mask_data_gauss = mask_data.detach().clone()
                     gauss_blur = GaussianBlur(kernel_size=3, sigma=2)
 
@@ -220,21 +159,17 @@ def train(backbone, ind_par):
             else:
                 print('Invalid backbone...')
                 sys.exit()
-            
-            if gauss:
-                loss_seg = pixel_looser(pred_comb, mask_data_gauss)
-            else:
-                loss_seg = pixel_looser(pred_comb, mask_data)
 
             loss_seg = pixel_looser(pred_comb, mask_data)
-            
+            loss_seg.backward()
+            batch_loss = batch_loss + loss_seg.item()
+            g_optimizer_seg.step()
+
+            if config['model']['final_layer'].lower() == 'none':
+                pred_comb = sigmoid(pred_comb)
+
             metrics_batch.append(evaluate_onec_slide(pred_comb.cpu().detach().numpy(), mask_data.cpu().detach().numpy(), thresh=thresh))
 
-            loss_seg.backward()
-
-            g_optimizer_seg.step()
-            batch_loss = batch_loss + loss_seg.item()
-            #print('batch_loss: ', batch_loss)
 
         train_metrics = np.nanmean(metrics_batch, axis=0)
         epoch_loss = batch_loss/(num+1)
@@ -262,8 +197,9 @@ def train(backbone, ind_par):
         optimizer_data.append([epoch, epoch_loss])
 
         with torch.no_grad():
-            
-            val_metrics, epoch_loss_val, input_data_val, pred_comb_val, mask_data_val = evaluate(data_loader_val, model_seg, device, pixel_looser, input_params, thresh=thresh)
+            model_seg.eval()
+
+            val_metrics, epoch_loss_val, input_data_val, pred_comb_val, mask_data_val = evaluate(data_loader_val, model_seg, device, pixel_looser, config, thresh=thresh)
 
             sum_writer.add_scalar("Loss/val", epoch_loss_val, epoch)
 
@@ -285,41 +221,47 @@ def train(backbone, ind_par):
             
             sum_writer.add_figure("Validation Data", figure_val, global_step=epoch)
 
-            if epoch_loss_val < best_loss:
-                best_loss = epoch_loss_val
+            if val_metrics[3] > best_iou:
+                best_iou = val_metrics[3]
 
-                if(torch.cuda.device_count() >1):
+                if data_parallel:
                     best_model_seg = copy.deepcopy(model_seg.module.state_dict())
                 else:
                     best_model_seg = copy.deepcopy(model_seg.state_dict())
 
-                best_weights_seg = copy.deepcopy(g_optimizer_seg.state_dict())
+                if config['scheduler']['use_scheduler']:
+                    scheduler_dict = scheduler.state_dict()
+                else:
+                    scheduler_dict = {}
+
                 num_no_improvement = 0
 
-                torch.save(best_model_seg, train_path+'model_seg.pth')               
-                torch.save(best_weights_seg, train_path+'model_weights_seg.pth')     
-
+                torch.save({
+                            'epoch': epoch,
+                            'model_state_dict': best_model_seg,
+                            'optimizer_state_dict': g_optimizer_seg.state_dict(),
+                            'scheduler_state_dict': scheduler_dict,
+                            }, train_path+'model_seg.pth')
+                
             else:
                 num_no_improvement += 1
 
             print(f"Epoch: {epoch:.0f}, Loss: {epoch_loss:.10f}, Val Loss: {epoch_loss_val:.10f}, No improvement in {num_no_improvement:.0f} epochs.")
         
-        scheduler.step(epoch_loss_val)
+        if config['scheduler']['use_scheduler']:
+            scheduler.step(epoch_loss_val)
+    
+        print(f"Current learning rate: {g_optimizer_seg.param_groups[0]['lr']:.8f}")
 
     sum_writer.close()
 
-def evaluate(data_loader, model_seg, device, pixel_looser, input_params, thresh=0.5):
-
-    model_seg.eval()
+def evaluate(data_loader, model_seg, device, pixel_looser, config, thresh=0.5):
 
     sigmoid = nn.Sigmoid()
 
-    width_par = input_params['width_par']
-    win_size = input_params['win_size']
-    backbone = input_params['backbone']
+    backbone = config['model']['name']
     
     batch_loss = 0
-    num_batch = 0
 
     metrics_batch = []
 
@@ -329,25 +271,23 @@ def evaluate(data_loader, model_seg, device, pixel_looser, input_params, thresh=
         mask_data = data['gt'].float().to(device)
 
         if backbone == 'unetr':
-            
             im_concat = torch.permute(input_data, (0, 2, 3, 4, 1))
             pred_comb = model_seg(im_concat)
             mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
+
+        elif backbone == 'cnn3d' or backbone == 'resunetpp' or backbone == 'maike_cnn3d':
             input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
-
-        elif backbone == 'cnn3d' or backbone == 'resunetpp':
-            #norm_data_val = nn.BatchNorm3d(1).to(device)
-
-            input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
-            #input_data = norm_data_val(input_data)
-
             mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
             pred_comb = model_seg(input_data)
 
-            if num == 0:
-                input_data_plot = input_data[0][0].cpu().detach().numpy()
-                pred_comb_plot = pred_comb[0][0].cpu().detach().numpy()
-                mask_data_plot = mask_data[0][0].cpu().detach().numpy()
+            if config['train']['binary_gt'] == False:
+                mask_data_gauss = mask_data.detach().clone()
+                gauss_blur = GaussianBlur(kernel_size=3, sigma=2)
+
+                for i in range(mask_data_gauss.shape[0]):
+                    for j in range(mask_data_gauss.shape[2]):
+                        mask_data_gauss[i,0,j,:,:] = gauss_blur(mask_data_gauss[i,:,j,:,:])
+                        mask_data_gauss[i,0,j,:,:] = torch.where(mask_data_gauss[i,0,j,:,:] > 1, 1, mask_data_gauss[i,0,j,:,:])
 
         else:
             print('Invalid backbone...')
@@ -355,95 +295,63 @@ def evaluate(data_loader, model_seg, device, pixel_looser, input_params, thresh=
 
         loss_seg = pixel_looser(pred_comb, mask_data)
 
-        metrics_batch.append(evaluate_onec_slide(pred_comb.cpu().detach().numpy(), mask_data.cpu().detach().numpy(), thresh=thresh))
-
         batch_loss = batch_loss + loss_seg.item()
 
+        if config['model']['final_layer'].lower() == 'none':
+            pred_comb = sigmoid(pred_comb)
+        
+        metrics_batch.append(evaluate_onec_slide(pred_comb.cpu().detach().numpy(), mask_data.cpu().detach().numpy(), thresh=thresh))
+
+    input_data_plot = input_data[0][0].cpu().detach().numpy()
+    pred_comb_plot = pred_comb[0][0].cpu().detach().numpy()
+    mask_data_plot = mask_data[0][0].cpu().detach().numpy()
+    
     metrics = np.nanmean(metrics_batch, axis=0)
     epoch_loss = batch_loss/(num+1)
 
     return metrics, epoch_loss, input_data_plot, pred_comb_plot, mask_data_plot
-
-def test(model_name, thresh=0.5):
-
-    device = torch.device("cpu")
-
-    model_path = 'Model_Train/'+ model_name + '/model_seg.pth'
-    weights_path = 'Model_Train/'+ model_name + '/model_weights_seg.pth'
-
-    batch_size = 4
-    num_workers = 2
-    width_par = 128
-    aug = True
-    win_size = 16
-    stride = int(2)
-
-    if(torch.backends.mps.is_available()):
-        device = torch.device("mps")
-        #matplotlib.use('Qt5Agg')
-
-    elif(torch.cuda.is_available()):
-        if os.path.isdir('/home/mbauer/Data/'):
-            device = torch.device("cuda")
-
-        elif os.path.isdir('/gpfs/data/fs72241/maibauer/'):
-            device = torch.device("cuda")
-
-        else:
-            sys.exit("Invalid data path. Exiting...")    
-
-    sigmoid = nn.Sigmoid()
-
-    backbone = model_name.split('_')[-1]
-    ind_par = int(model_name.split('_')[4])
-
-    input_params = {'width_par': width_par, 'win_size': win_size, 'backbone': backbone}
-
-    if backbone == 'unetr':
-        pixel_looser = nn.BCEWithLogitsLoss()
-
-    elif backbone == 'cnn3d' or backbone == 'resunetpp':
-        pixel_looser = nn.BCELoss()
-        # pixel_looser = DiceLoss()
-
-    if backbone == 'unetr':
-        model_seg = UNETR_16(in_channels=1,
-        out_channels=1,
-        img_size=(width_par, width_par, win_size),
-        feature_size=32,
-        hidden_size=768,
-        mlp_dim=3072,
-        num_heads=12,
-        pos_embed='perceptron',
-        norm_name='instance',
-        conv_block=True,
-        res_block=True,
-        dropout_rate=0.0)
-
-    elif backbone == 'cnn3d': 
-        model_seg = CNN3D(input_channels=1, output_channels=1)
     
-    elif backbone == 'resunetpp':
-        model_seg = ResUnetPlusPlus(channel=1, drop_p=0.1)
+def test():
 
-    model_seg.load_state_dict(torch.load(model_path, map_location=device))
-    model_seg.to(device)
+    mode = 'test'
+    config = parse_yml('config.yaml')
+
+    device = config['model']['device']
+    batch_size = config['train']['batch_size']
+    num_workers = config['train']['num_workers']
+    width_par = config['dataset']['width']
+
+    win_size = config['dataset']['win_size']
+    stride = config['dataset']['stride']
+    thresh = config['train']['threshold_iou']  
+
+    backbone = config['model']['name']
+    data_parallel = config['train']['data_parallel']
 
     composed = v2.Compose([v2.ToTensor()])
 
-    dataset = RundifSequence(transform=composed,mode='test',win_size=win_size,stride=stride,width_par=width_par,ind_par=ind_par,include_potential=False,include_potential_gt=False)
+    quick_run = config['dataset']['quick_run']
+
+    data_path = config['dataset']['data_path']
+    annotation_path = config['dataset']['annotation_path']
+
+    sigmoid = nn.Sigmoid()
+    model_seg = load_model(config, mode)
+
+    model_seg.to(device)
+    model_seg.eval()
+
+    dataset = RundifSequence(data_path=data_path,annotation_path=annotation_path,transform=composed,mode='test',win_size=win_size,stride=stride,width_par=width_par,include_potential=config['train']['include_potential'],include_potential_gt=config['train']['include_potential_gt'],quick_run=quick_run)
 
     data_loader = torch.utils.data.DataLoader(
                                                 dataset,
                                                 batch_size=batch_size,
-                                                shuffle=False,
+                                                shuffle=config['test']['shuffle'],
                                                 num_workers=num_workers,
                                                 pin_memory=False
                                             )    
 
     indices_test = dataset.img_ids_win
-
-    model_seg.eval()
 
     sigmoid = nn.Sigmoid()
 
@@ -457,7 +365,6 @@ def test(model_name, thresh=0.5):
     for val in range(n_ind):
         pred_save.append([])
     
-    batch_loss = 0
     num_batch = 0
 
     ind_keys = sorted(set(np.array(indices_test).flatten()))
@@ -479,21 +386,18 @@ def test(model_name, thresh=0.5):
             mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
             input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
 
-        elif backbone == 'cnn3d' or backbone == 'resunetpp':
-            #norm_data_val = nn.BatchNorm3d(1).to(device)
-
+        elif backbone == 'cnn3d' or backbone == 'resunetpp' or backbone == 'maike_cnn3d':
             input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
-            #input_data = norm_data_val(input_data)
-
             mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
             pred_comb = model_seg(input_data)
 
         else:
             print('Invalid backbone...')
             sys.exit()
-
-        loss_seg = pixel_looser(pred_comb, mask_data)
         
+        if config['model']['final_layer'].lower() == 'none':
+            pred_comb = sigmoid(pred_comb)
+
         for b in range(mask_data.shape[0]):
             for k in range(win_size):
                 current_ind = ind_dict[indices_test[num_batch][k]]
@@ -504,20 +408,10 @@ def test(model_name, thresh=0.5):
                     input_masks[current_ind] = mask_data[b,0,k,:,:].cpu().detach().numpy()
 
             num_batch = num_batch + 1
-
-        batch_loss = batch_loss + loss_seg.item()
     
-    epoch_loss = batch_loss/(num+1)
-
     input_imgs = np.array(input_imgs)
 
     for h, pred_arr in enumerate(pred_save):
-        for j in range(len(pred_arr)):
-            if backbone == 'unetr':
-                pred_arr[j] = sigmoid(pred_arr[j].cpu().detach())
-            elif backbone == 'cnn3d' or backbone == 'resunetpp':
-                pred_arr[j] = pred_arr[j]
-        
         pred_save[h] = np.nanmean(pred_arr,axis=0)
 
     pred_save = np.array(pred_save)
@@ -525,9 +419,10 @@ def test(model_name, thresh=0.5):
     input_imgs = torch.Tensor(input_imgs)
     input_masks = torch.Tensor(input_masks)
 
-    metrics = evaluate_onec_slide(pred_save.cpu().detach().numpy(),input_masks.cpu().detach().numpy(), thresh=thresh)
+    for t in thresh:
+        metrics = evaluate_onec_slide(pred_save.cpu().detach().numpy(),input_masks.cpu().detach().numpy(), thresh=t)
 
-    metrics_path = 'Model_Test/' + model_name+ '/'
+    metrics_path = '/'.join(config['test']['model_path'].split('/')[:-1])
 
     if not os.path.exists(metrics_path): 
         os.makedirs(metrics_path, exist_ok=True) 
@@ -536,24 +431,14 @@ def test(model_name, thresh=0.5):
     print(metrics)
 
 if __name__ == "__main__":
-    try:
-        backbone = str(sys.argv[1])
-    except IndexError:
-        backbone = 'cnn3d'
 
     try:
-        mode = str(sys.argv[2])
+        mode = str(sys.argv[1])
     except IndexError:
         mode = 'train'
 
-    try:
-        ind_par = int(sys.argv[3])
-    except IndexError:
-        ind_par = None  
-
     if mode == 'train':
-        train(backbone=backbone,ind_par=ind_par)
+        train()
     
     elif mode == 'test':
-        model_name = sys.argv[4]
-        test(model_name=model_name)
+        test()

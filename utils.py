@@ -223,6 +223,8 @@ def load_augmentations(config):
     "ToImage": v2.ToImage,
     "ToDtype": v2.ToDtype,
     "ToTensor": v2.ToTensor,
+    "GaussianBlur": v2.GaussianBlur,
+    "ElasticTransform": v2.ElasticTransform,
     }
 
     TORCH_DTYPES = {
@@ -244,7 +246,15 @@ def load_augmentations(config):
                 params['dtype'] = TORCH_DTYPES[params['dtype']]
 
             # Instantiate the augmentation with its parameters
-            augmentations.append(aug_class(**params))
+            if 'randomize' in params and params['randomize'] > 0:
+                del params['randomize']
+                augmentations.append(v2.RandomApply([aug_class(**params)]))
+            elif 'randomize' in params and params['randomize'] == 0:
+                del params['randomize']
+                augmentations.append(aug_class(**params))
+            else:
+                augmentations.append(aug_class(**params))
+
         else:
             raise ValueError(f"Unknown augmentation: {name}")
         
@@ -273,7 +283,7 @@ def load_model(config, mode, test_model=''):
         checkpoint = torch.load(config['train']['load_checkpoint']['checkpoint_path'], weights_only=True)
         model.load_state_dict(checkpoint['model_state_dict'])
 
-    elif (mode == 'test'):
+    elif (mode == 'test' or mode == 'val'):
         if os.path.exists(test_model):
             checkpoint = torch.load(test_model, weights_only=True)
             model.load_state_dict(checkpoint['model_state_dict'])

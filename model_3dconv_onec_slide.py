@@ -44,8 +44,8 @@ def train():
     data_path = config['dataset']['data_path']
     annotation_path = config['dataset']['annotation_path']
 
-    dataset = RundifSequence(data_path=data_path,annotation_path=annotation_path,transform=composed,mode='train',win_size=win_size,stride=stride,width_par=width_par,include_potential=config['train']['include_potential'],include_potential_gt=config['train']['include_potential_gt'],quick_run=quick_run)
-    dataset_val = RundifSequence(data_path=data_path,annotation_path=annotation_path,transform=composed_val,mode='val',win_size=win_size,stride=stride,width_par=width_par,include_potential=config['evaluate']['include_potential'],include_potential_gt=config['evaluate']['include_potential_gt'],quick_run=quick_run)
+    dataset = RundifSequence(data_path=data_path,annotation_path=annotation_path,im_transform=composed,mode='train',win_size=win_size,stride=stride,width_par=width_par,include_potential=config['train']['include_potential'],include_potential_gt=config['train']['include_potential_gt'],quick_run=quick_run)
+    dataset_val = RundifSequence(data_path=data_path,annotation_path=annotation_path,im_transform=composed_val,mode='val',win_size=win_size,stride=stride,width_par=width_par,include_potential=config['evaluate']['include_potential'],include_potential_gt=config['evaluate']['include_potential_gt'],quick_run=quick_run)
 
     data_loader = torch.utils.data.DataLoader(
                                                 dataset,
@@ -341,7 +341,7 @@ def test():
     model_seg.to(device)
     model_seg.eval()
 
-    dataset = RundifSequence(data_path=data_path,annotation_path=annotation_path,transform=composed,mode='test',win_size=win_size,stride=stride,width_par=width_par,include_potential=config['train']['include_potential'],include_potential_gt=config['train']['include_potential_gt'],quick_run=quick_run)
+    dataset = RundifSequence(data_path=data_path,annotation_path=annotation_path,im_transform=composed,mode='test',win_size=win_size,stride=stride,width_par=width_par,include_potential=config['train']['include_potential'],include_potential_gt=config['train']['include_potential_gt'],quick_run=quick_run)
 
     data_loader = torch.utils.data.DataLoader(
                                                 dataset,

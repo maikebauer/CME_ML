@@ -18,12 +18,111 @@ import random
 from skimage import transform
 import datetime
 
-class RundifSequence(Dataset):
-    def __init__(self, data_path, annotation_path, transform=None, mode='train', win_size=16, stride=2, width_par=128, include_potential=True, include_potential_gt=False, quick_run=False):
+class RundifSequence_SSW(Dataset):
+    def __init__(self, data_path, annotation_path, width_par=128, include_potential=True, include_potential_gt=False, quick_run=False):
         
         rng = default_rng()
 
-        self.transform = transform
+        self.width_par = width_par
+        self.include_potential = include_potential
+        self.include_potential_gt = include_potential_gt
+        self.quick_run = quick_run
+        self.annotation_path = annotation_path
+        self.data_path = data_path
+
+        self.coco_obj = coco.COCO(self.annotation_path)
+        
+        self.img_ids = self.coco_obj.getImgIds()
+
+        time_list = []
+
+        for a in range(0, len(self.img_ids)):
+            time_list.append(datetime.datetime.strptime(self.coco_obj.loadImgs([self.img_ids[a]])[0]['file_name'].split('/')[-1][:15], '%Y%m%d_%H%M%S'))
+
+        time_list = np.array(time_list)
+
+        my_ind = np.where((time_list > datetime.datetime.strptime('2012-05-10 00:00:00', '%Y-%m-%d %H:%M:%S')) & (time_list < datetime.datetime.strptime('2012-05-12 00:00:00', '%Y-%m-%d %H:%M:%S')))[0]+1
+
+        self.img_ids_win = my_ind
+        
+    def __getitem__(self, index):
+       
+        seed = int(index)
+
+        GT_all = []
+        im_all = []
+        
+        idx = self.img_ids_win[index]
+        file_names = []
+        
+        img_info = self.coco_obj.loadImgs([idx])[0]
+        img_file_name = img_info["file_name"].split('/')[-1].split('.')[0] + '.npy'
+
+        file_names.append(img_file_name)
+
+        height_par = self.width_par
+
+        # Use URL to load image.
+
+        im = np.load(self.data_path+img_file_name)
+
+        if self.width_par != 1024:
+            im = transform.resize(im, (self.width_par , height_par), anti_aliasing=True, preserve_range=True)
+
+        GT = []
+        annotations = self.coco_obj.getAnnIds(imgIds=idx)
+
+        if (len(annotations)>0):
+            for a in annotations:
+                
+                ann = self.coco_obj.loadAnns(a)
+                attr_potential = ann[0]['attributes']['potential']
+
+                if attr_potential:
+                    if (self.include_potential_gt == True) or (self.include_potential == True):
+                        GT.append(coco.maskUtils.decode(coco.maskUtils.frPyObjects([ann[0]['segmentation']], 1024, 1024))[:,:,0])
+                    else:
+                        GT.append(np.zeros((1024,1024)))
+
+                else:
+                    GT.append(coco.maskUtils.decode(coco.maskUtils.frPyObjects([ann[0]['segmentation']], 1024, 1024))[:,:,0])
+                    
+        else:
+            GT.append(np.zeros((1024,1024)))
+        
+        GT = np.array(GT)
+        GT = Image.fromarray((np.nansum(GT, axis=0)*255).astype(np.uint8)).convert("L")
+
+        if self.width_par != 1024:
+            GT = GT.resize((self.width_par , height_par))
+
+        GT = np.array(GT)/255.0
+
+        dilation = False
+
+        if dilation:
+            kernel = disk(2)
+            n_it = int(self.width_par/64)
+            
+            GT = ndimage.binary_dilation(GT, structure=kernel, iterations=n_it)
+        
+        GT_all.append(GT)
+        im_all.append(im)
+
+        GT_all = np.array(GT_all)
+        im_all = np.array(im_all)
+        
+        return {'image':torch.tensor(im_all), 'gt':torch.tensor(GT_all), 'names':file_names}
+    
+    def __len__(self):
+        return len(self.img_ids_win)
+    
+class RundifSequence(Dataset):
+    def __init__(self, data_path, annotation_path, im_transform=None, mode='train', win_size=16, stride=2, width_par=128, include_potential=True, include_potential_gt=False, quick_run=False):
+        
+        rng = default_rng()
+
+        self.im_transform = im_transform
         self.mode = mode
         self.width_par = width_par
         self.include_potential = include_potential
@@ -219,7 +318,7 @@ class RundifSequence(Dataset):
                     attr_potential = ann[0]['attributes']['potential']
 
                     if attr_potential:
-                        if self.include_potential_gt == True:
+                        if (self.include_potential_gt == True) or (self.include_potential == True):
                             GT.append(coco.maskUtils.decode(coco.maskUtils.frPyObjects([ann[0]['segmentation']], 1024, 1024))[:,:,0])
                         else:
                             GT.append(np.zeros((1024,1024)))
@@ -247,10 +346,10 @@ class RundifSequence(Dataset):
                 GT = ndimage.binary_dilation(GT, structure=kernel, iterations=n_it)
 
             torch.manual_seed(seed)
-            im = self.transform(im)
+            im = self.im_transform(im)
 
             torch.manual_seed(seed)
-            GT = self.transform(GT)
+            GT = self.im_transform(GT)
             
             GT_all.append(GT)
             im_all.append(im)

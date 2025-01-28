@@ -60,6 +60,9 @@ ssw_coco_annotations_new.json
 ssw_coco_annotations_elongation.json
 ssw_coco_annotations_new_elongation.json
 *.csv
+mosse.py
+utils_mosse.py
+extract_fronts.py
 
 # Folders to ignore #
 ###################

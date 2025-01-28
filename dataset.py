@@ -17,7 +17,46 @@ from utils import sep_noevent_data, check_diff
 import random
 from skimage import transform
 import datetime
+import glob
 
+class RundifSequence_Test(Dataset):
+    def __init__(self, data_path,  win_size=16, stride=2, width_par=128):
+        
+        self.width_par = width_par
+        self.data_path = data_path
+        self.win_size = win_size
+        self.stride = stride
+
+        # Load filenames whose names are between start and end date
+        all_files = np.array(sorted(glob.glob(self.data_path + '*.npy')))
+
+        self.files_strided = np.lib.stride_tricks.sliding_window_view(all_files,self.win_size)[::self.stride, :]
+        
+    def __getitem__(self, index):
+       
+        seed = int(index)
+
+        im_all = []
+        
+        file_names = list(self.files_strided[index])
+
+        height_par = self.width_par
+        im_all = []
+
+        for file in file_names:
+            im = np.load(file)
+
+            if self.width_par != 1024:
+                im = transform.resize(im, (self.width_par , height_par), anti_aliasing=True, preserve_range=True)
+
+            im_all.append(im)
+
+        im_all = np.array(im_all)
+        return {'image':torch.tensor(im_all).unsqueeze(1), 'names':file_names}
+    
+    def __len__(self):
+        return len(self.files_strided)
+    
 class RundifSequence_SSW(Dataset):
     def __init__(self, data_path, annotation_path, width_par=128, include_potential=True, include_potential_gt=False, quick_run=False):
         

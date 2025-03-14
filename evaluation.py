@@ -5,41 +5,20 @@ import numpy as np
 from matplotlib.colors import ListedColormap
 import os
 
-def Kappa_cohen(predictions,groundtruth):
-    # True Positive (TP): we predict a label of 1 (positive), and the true label is 1.
-    TP = np.sum(np.logical_and(predictions == 1, groundtruth == 1))
-     
-    # True Negative (TN): we predict a label of 0 (negative), and the true label is 0.
-    TN = np.sum(np.logical_and(predictions == 0, groundtruth == 0))
-     
-    # False Positive (FP): we predict a label of 1 (positive), but the true label is 0.
-    FP = np.sum(np.logical_and(predictions == 1, groundtruth == 0))
+def Kappa_cohen(TP, FP, FN, TN, gt_shape, pred_shape):
+
+    gt_neg = TN+FP
+    gt_pos = TP+FN
     
-    # False Negative (FN): we predict a label of 0 (negative), but the true label is 1.
-    FN   = np.sum(np.logical_and(predictions == 0, groundtruth ==  1))
-    gt_neg = np.sum(groundtruth ==  0)
-    gt_pos = np.sum(groundtruth ==  1)
-    
-    sum_total = (np.shape(groundtruth)[0]*np.shape(groundtruth)[1]+np.shape(predictions)[0]*np.shape(predictions)[1])
+    sum_total = (gt_shape[0]*gt_shape[1]+pred_shape[0]*pred_shape[1])
     observed_accuracy  =   (TP+TN)/sum_total
     expected_accuracy  =   ((gt_pos*(TP+FP))/sum_total + (gt_neg*(TN+FN))/sum_total)/sum_total
 
     return (observed_accuracy - expected_accuracy)/ (1- expected_accuracy)
 
-def precision_recall(predictions,groundtruth):
-    # True Positive (TP): we predict a label of 1 (positive), and the true label is 1.
-    TP = np.sum(np.logical_and(predictions == 1, groundtruth == 1))
-     
-    # True Negative (TN): we predict a label of 0 (negative), and the true label is 0.
-    TN = np.sum(np.logical_and(predictions == 0, groundtruth == 0))
-     
-    # False Positive (FP): we predict a label of 1 (positive), but the true label is 0.
-    FP = np.sum(np.logical_and(predictions == 1, groundtruth == 0))
-    
-    # False Negative (FN): we predict a label of 0 (negative), but the true label is 1.
-    FN = np.sum(np.logical_and(predictions == 0, groundtruth ==  1))
+def precision_recall(TP, FP, FN):
 
-    if np.sum(groundtruth) == 0:
+    if (TP+FN == 0):
         recall = np.nan
         precision = np.nan
     else:
@@ -48,42 +27,20 @@ def precision_recall(predictions,groundtruth):
 
     return precision,recall
 
-def IoU(predictions,groundtruth):
-   # True Positive (TP): we predict a label of 1 (positive), and the true label is 1.
-    TP = np.sum(np.logical_and(predictions == 1, groundtruth == 1))
-     
-    # True Negative (TN): we predict a label of 0 (negative), and the true label is 0.
-    TN = np.sum(np.logical_and(predictions == 0, groundtruth == 0))
-     
-    # False Positive (FP): we predict a label of 1 (positive), but the true label is 0.
-    FP = np.sum(np.logical_and(predictions == 1, groundtruth == 0))
-    
-    # False Negative (FN): we predict a label of 0 (negative), but the true label is 1.
-    FN   = np.sum(np.logical_and(predictions == 0, groundtruth ==  1))
+def IoU(TP, FP, FN):
 
-    if np.sum(groundtruth) == 0:
+    if (TP+FN == 0):
         iou = np.nan
     else:
         iou =  TP/(TP+FP+FN)
 
     return  iou
 
-def Accuracy(predictions,groundtruth):
-    # True Positive (TP): we predict a label of 1 (positive), and the true label is 1.
-    TP = np.sum(np.logical_and(predictions == 1, groundtruth == 1))
-
-    # True Negative (TN): we predict a label of 0 (negative), and the true label is 0.
-    TN = np.sum(np.logical_and(predictions == 0, groundtruth == 0))
-     
-    # False Positive (FP): we predict a label of 1 (positive), but the true label is 0.
-    FP = np.sum(np.logical_and(predictions == 1, groundtruth == 0))
-    
-    # False Negative (FN): we predict a label of 0 (negative), but the true label is 1.
-    FN   = np.sum(np.logical_and(predictions == 0, groundtruth ==  1))
+def Accuracy(TP, FP, FN, TN):
 
     acc = (TP+TN)/(TP+TN+FP+FN)
 
-    return  acc
+    return acc
 
 def confusion_images(predictions,groundtruth):
     # True Positive (TP): we predict a label of 1 (positive), and the true label is 1.
@@ -98,7 +55,31 @@ def confusion_images(predictions,groundtruth):
     # False Negative (FN): we predict a label of 0 (negative), but the true label is 1.
     FN   = np.logical_and(predictions == 0, groundtruth ==  1)
 
-    return  TP, TN, FP, FN
+    return  TP, FP, FN, TN
+
+def confusion_metrics(predictions,groundtruth):
+    # True Positive (TP): we predict a label of 1 (positive), and the true label is 1.
+    TP = np.sum(np.logical_and(predictions == 1, groundtruth == 1))
+
+    # True Negative (TN): we predict a label of 0 (negative), and the true label is 0.
+    TN = np.sum(np.logical_and(predictions == 0, groundtruth == 0))
+     
+    # False Positive (FP): we predict a label of 1 (positive), but the true label is 0.
+    FP = np.sum(np.logical_and(predictions == 1, groundtruth == 0))
+    
+    # False Negative (FN): we predict a label of 0 (negative), but the true label is 1.
+    FN   = np.sum(np.logical_and(predictions == 0, groundtruth ==  1))
+
+    return  TP, FP, FN, TN
+
+def dice(TP, FP, FN):
+
+    if (TP+FN == 0):
+        dsc = np.nan
+    else:
+        dsc = 2*TP/(2*TP+FP+FN)
+    
+    return dsc
 
 def evaluate_basic(pred, gt, img, model_name, folder_path, data_num, epoch=None):
 
@@ -185,14 +166,14 @@ def evaluate_onec_slide(pred, gt, thresh=0.5):
         mask_pred[mask_pred >= thresh] = 1
         mask_pred[mask_pred < thresh] = 0
         
+        TP, FP, FN, TN = confusion_metrics(mask_pred,gt_win)
         #computing metrics
-        kapa = Kappa_cohen(mask_pred,gt_win) ## kinda accuracy but for masks with a lot of background and small mask areas
-        precision,recall = precision_recall(mask_pred,gt_win) #precision recall at different thresholds for doing a precision recall curve plot
-        iou = IoU(mask_pred,gt_win) ## main metric to look at, take the mean over dataset or over thresholds 
-        acc = Accuracy(mask_pred,gt_win) #no need to explain
+        kapa = Kappa_cohen(TP, FP, FN, TN, mask_pred.shape, gt_win.shape) ## kinda accuracy but for masks with a lot of background and small mask areas
+        precision,recall = precision_recall(TP, FP, FN) #precision recall at different thresholds for doing a precision recall curve plot
+        iou = IoU(TP, FP, FN) ## main metric to look at, take the mean over dataset or over thresholds 
+        acc = Accuracy(TP, FP, FN, TN) #no need to explain
         #confusion_matrix = [[TP, FN], [FP, TN]]
 
-        TP, TN, FP, FN = confusion_images(mask_pred,gt_win)
         metrics.append([kapa,precision,recall,iou,acc])
     
     metrics = np.nanmean(metrics, axis=0)

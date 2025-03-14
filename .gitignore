@@ -45,7 +45,6 @@ Thumbs.db
 *.ipynb
 *.png
 *.pth
-*.npy
 output.txt
 Flowattempt.py
 message.py
@@ -63,6 +62,9 @@ ssw_coco_annotations_new_elongation.json
 mosse.py
 utils_mosse.py
 extract_fronts.py
+extract_fronts_ml.py
+run_test_operational.py
+run_test_ml.py
 
 # Folders to ignore #
 ###################
@@ -81,3 +83,4 @@ runs/
 Old_Runs/
 compare_ssw_cnn_copy.py
 config.yaml
+*.csv

@@ -157,7 +157,7 @@ class RundifSequence_SSW(Dataset):
         return len(self.img_ids_win)
     
 class RundifSequence(Dataset):
-    def __init__(self, data_path, annotation_path, im_transform=None, mode='train', win_size=16, stride=2, width_par=128, include_potential=True, include_potential_gt=False, quick_run=False):
+    def __init__(self, data_path, annotation_path, im_transform=None, mode='train', win_size=16, stride=2, width_par=128, include_potential=True, include_potential_gt=True, quick_run=False, cross_validation=False, fold_file=None, fold_definition=None):
         
         rng = default_rng()
 
@@ -174,28 +174,35 @@ class RundifSequence(Dataset):
         
         self.img_ids = self.coco_obj.getImgIds()
 
-        self.annotated = []
-        self.events = []
+        if cross_validation == False:
+            self.annotated = []
+            self.events = []
 
-        event_list = []
-        time_list = {}
-        temp_list = []
-        
-        for a in range(0, len(self.img_ids)):
+            event_list = []
+            time_list = {}
+            temp_list = []
+            
+            for a in range(0, len(self.img_ids)):
 
-            anns = self.coco_obj.getAnnIds(imgIds=[self.img_ids[a]])
-            time_list[a] = datetime.datetime.strptime(self.coco_obj.loadImgs([self.img_ids[a]])[0]['file_name'].split('/')[-1][:15], '%Y%m%d_%H%M%S')
+                anns = self.coco_obj.getAnnIds(imgIds=[self.img_ids[a]])
+                time_list[a] = datetime.datetime.strptime(self.coco_obj.loadImgs([self.img_ids[a]])[0]['file_name'].split('/')[-1][:15], '%Y%m%d_%H%M%S')
 
-            if(len(anns)>0):
-                cats = [self.coco_obj.loadAnns(anns[i]) for i in range(len(anns))]
-                attr_potential = [cats[i][0]['attributes']['potential'] for i in range(len(cats))]
+                if(len(anns)>0):
+                    cats = [self.coco_obj.loadAnns(anns[i]) for i in range(len(anns))]
+                    attr_potential = [cats[i][0]['attributes']['potential'] for i in range(len(cats))]
 
-                if not self.include_potential:
-                    if all(attr_potential):
-                        if len(temp_list) > 0:
-                            event_list.append(temp_list)
-                            temp_list = []
-                          
+                    if not self.include_potential:
+                        if all(attr_potential):
+                            if len(temp_list) > 0:
+                                event_list.append(temp_list)
+                                temp_list = []
+                            
+                        else:
+                            self.annotated.append(a)
+                            temp_list.append(a)
+
+                            if a == len(self.img_ids)-1:
+                                event_list.append(temp_list)
                     else:
                         self.annotated.append(a)
                         temp_list.append(a)
@@ -203,79 +210,79 @@ class RundifSequence(Dataset):
                         if a == len(self.img_ids)-1:
                             event_list.append(temp_list)
                 else:
-                    self.annotated.append(a)
-                    temp_list.append(a)
-
-                    if a == len(self.img_ids)-1:
+                    if len(temp_list) > 0:
                         event_list.append(temp_list)
-            else:
-                if len(temp_list) > 0:
-                    event_list.append(temp_list)
 
-                    temp_list = []
+                        temp_list = []
 
-        self.events = event_list
+            self.events = event_list
 
-        event_ranges = []
+            event_ranges = []
 
-        for i in range(len(self.events)):
-            len_set = int(len(self.events[i])/2)
+            for i in range(len(self.events)):
+                len_set = int((len(self.events[i])))
 
-            if len(self.events[i]) < win_size/2:
-                len_set = int(win_size/2 - len_set)
+                if len(self.events[i]) < win_size:
+                    len_set = int(win_size - len_set)
 
-            if i == 0:
-                diff = [self.events[i][0] - 0, self.events[i+1][0] - self.events[i][-1]]
-                event_ranges.append(check_diff(diff, len_set, self.events[i], time_list, win_size))
+                if i == 0:
+                    diff = [self.events[i][0] - 0, self.events[i+1][0] - self.events[i][-1]]
+                    event_ranges.append(check_diff(diff, len_set, self.events[i], time_list, win_size))
 
-            elif i == len(self.events)-1:
-                diff = [self.events[i][0] - event_ranges[i-1][-1], (self.img_ids[-1]-1) - self.events[i][-1]]
+                elif i == len(self.events)-1:
+                    diff = [self.events[i][0] - event_ranges[i-1][-1], (self.img_ids[-1]-1) - self.events[i][-1]]
 
-                if diff[1] == 0:
-                    diff[1] = 2
+                    if diff[1] == 0:
+                        diff[1] = 2
 
-                event_ranges.append(check_diff(diff, len_set, self.events[i], time_list, win_size))
+                    event_ranges.append(check_diff(diff, len_set, self.events[i], time_list, win_size))
 
-            else:
-                diff = [self.events[i][0] - event_ranges[i-1][-1], self.events[i+1][0] - self.events[i][-1]]
-                event_ranges.append(check_diff(diff, len_set, self.events[i], time_list, win_size))
-                    
-        len_train = int(len(event_ranges)*0.7)
-        len_test = int(len(event_ranges)*0.2)
-        len_val = int(len(event_ranges))-(len_train+len_test)
+                else:
+                    diff = [self.events[i][0] - event_ranges[i-1][-1], self.events[i+1][0] - self.events[i][-1]]
+                    event_ranges.append(check_diff(diff, len_set, self.events[i], time_list, win_size))
+                        
+            len_train = int(len(event_ranges)*0.7)
+            len_test = int(len(event_ranges)*0.2)
+            len_val = int(len(event_ranges))-(len_train+len_test)
 
-        all_ind = list(np.arange(0, len(event_ranges)))
+            all_ind = list(np.arange(0, len(event_ranges)))
 
-        ###### DO NOT CHANGE THIS SEED ######
-        seed = 42
+            ###### DO NOT CHANGE THIS SEED ######
+            seed = 42
 
-        random.seed(seed)
-        train_ind = random.sample(all_ind, k=len_train)
-        all_ind = list(np.setdiff1d(all_ind, train_ind))
+            random.seed(seed)
+            train_ind = random.sample(all_ind, k=len_train)
+            all_ind = list(np.setdiff1d(all_ind, train_ind))
 
-        random.seed(seed)
-        test_ind = random.sample(all_ind, k=len_test)
-        all_ind = np.setdiff1d(all_ind, test_ind)
+            random.seed(seed)
+            test_ind = random.sample(all_ind, k=len_test)
+            all_ind = np.setdiff1d(all_ind, test_ind)
 
-        val_ind = all_ind.copy()
-        
-        set_train = [np.array(event_ranges[i])+1 for i in train_ind]
-        set_test = [np.array(event_ranges[i])+1 for i in test_ind]
-
-        for i, ran in enumerate(set_test):
-        
-            if 3880 in ran:
-                ran = np.delete(ran, np.where(ran == 3880))
-            if 3881 in ran:
-                ran = np.delete(ran, np.where(ran == 3881))
-
-            if 3882 in ran:
-                ran = np.delete(ran, np.where(ran == 3882))
-
-            set_test[i] = ran
+            val_ind = all_ind.copy()
             
-        set_val = [np.array(event_ranges[i])+1 for i in val_ind]
+            set_train = [np.array(event_ranges[i])+1 for i in train_ind]
+            set_test = [np.array(event_ranges[i])+1 for i in test_ind]
+            set_val = [np.array(event_ranges[i])+1 for i in val_ind]
 
+        else:
+            fold_dict = np.load(fold_file, allow_pickle=True).item()
+            
+            train_folds = fold_definition['train']
+            test_folds = fold_definition['test']
+            val_folds = fold_definition['val']
+
+            set_train = []
+            for f in train_folds:
+                set_train.extend(fold_dict[f]['image_ids'])
+
+            set_test = []
+            for f in test_folds:
+                set_test.extend(fold_dict[f]['image_ids'])
+
+            set_val = []
+            for f in val_folds:
+                set_val.extend(fold_dict[f]['image_ids'])
+            
         self.set_train = set_train
         self.set_test = set_test
         self.set_val = set_val
@@ -295,14 +302,6 @@ class RundifSequence(Dataset):
         for i in range(len(set_val)):
             val_paired_idx.append(np.lib.stride_tricks.sliding_window_view(set_val[i],win_size)[::stride, :])        
 
-        not_annotated = np.array(np.setdiff1d(np.arange(0,len(self.img_ids)),np.array(self.annotated)))
-        self.not_annotated = not_annotated
-
-        all_anns = list(self.annotated) + list(self.not_annotated)
-        all_anns = sorted(all_anns)
-
-        self.all_anns = all_anns
-
         self.img_ids = np.array(self.img_ids)
 
         if mode == 'train':
@@ -315,12 +314,11 @@ class RundifSequence(Dataset):
             sys.exit('Invalid mode. Specifiy either train, val, or test.')
 
         if self.quick_run:
-            #self.img_ids_win = self.img_ids_win[:int(len(self.img_ids_win)/8)]
             self.img_ids_win = self.img_ids_win[:10]
 
-        self.win_train = sorted(set(np.array([item for inner_list in train_paired_idx for item in inner_list]).flatten()))
-        self.win_val = sorted(set(np.array([item for inner_list in val_paired_idx for item in inner_list]).flatten()))
-        self.win_test = sorted(set(np.array([item for inner_list in test_paired_idx for item in inner_list]).flatten()))
+        self.img_ids_train_win = [item for inner_list in train_paired_idx for item in inner_list]
+        self.img_ids_val_win = [item for inner_list in val_paired_idx for item in inner_list]
+        self.img_ids_test_win = [item for inner_list in test_paired_idx for item in inner_list]
 
     def __getitem__(self, index):
        
@@ -383,6 +381,18 @@ class RundifSequence(Dataset):
                 n_it = int(self.width_par/64)
                 
                 GT = ndimage.binary_dilation(GT, structure=kernel, iterations=n_it)
+
+            normalize = False
+
+            if normalize:
+                vmin = np.nanmedian(im) - 2.5*np.nanstd(im)
+                vmax = np.nanmedian(im) + 2.5*np.nanstd(im)
+
+                im[im < vmin] = vmin
+                im[im > vmax] = vmax
+
+                im = (im - np.nanmin(im))/(np.nanmax(im) - np.nanmin(im))
+                im = np.clip(im, 0, 1)
 
             torch.manual_seed(seed)
             im = self.im_transform(im)

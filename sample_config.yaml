@@ -20,10 +20,10 @@ model:
   seed: 42
 
 optimizer:
-  name: AdamW
+  name: Adam
   optimizer_parameters:
-    lr: 1.0e-06
-    weight_decay: 0.01
+    lr: 1.0e-05
+    weight_decay: 0.0
 
 scheduler:
   use_scheduler: false
@@ -43,13 +43,31 @@ loss:
 train:
   batch_size: 4
   num_workers: 2
-  epochs: 200
-  include_potential: false
-  include_potential_gt: false
+  epochs: 150
+  include_potential: true
+  include_potential_gt: true
   data_parallel: true
   shuffle: true
   binary_gt: true
   threshold_iou: 0.9
+  cross_validation:
+    use_cross_validation: true
+    fold_file: "/path/to/folds_dictionary.npy"
+    fold_definition:
+      train:
+        - fold_1
+        - fold_2
+        - fold_3
+        - fold_4
+        - fold_5
+        - fold_6
+        - fold_7
+        - fold_8
+      test:
+        - fold_9
+      val:
+        - fold_10
+        
   data_augmentation:
   - name: ToTensor
   - name: RandomHorizontalFlip
@@ -57,21 +75,21 @@ train:
   - name: RandomVerticalFlip
     p: 0.5
   load_checkpoint:
-    load_model: false
-    load_optimizer: false
+    load_model: False
+    load_optimizer: False
     checkpoint_path: "/path/to/checkpoint.pth"
     updated_lr: 1.0e-05
 
 evaluate:
-  include_potential: false
-  include_potential_gt: false
+  include_potential: true
+  include_potential_gt: true
   shuffle: false
   binary_gt: true
 
 test:
   model_path: "/path/to/model.pth"
-  include_potential: false
-  include_potential_gt: false
+  include_potential: true
+  include_potential_gt: true
   shuffle: false
   binary_gt: true
   threshold_iou: 0.9

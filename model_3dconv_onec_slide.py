@@ -44,8 +44,12 @@ def train():
     data_path = config['dataset']['data_path']
     annotation_path = config['dataset']['annotation_path']
 
-    dataset = RundifSequence(data_path=data_path,annotation_path=annotation_path,im_transform=composed,mode='train',win_size=win_size,stride=stride,width_par=width_par,include_potential=config['train']['include_potential'],include_potential_gt=config['train']['include_potential_gt'],quick_run=quick_run)
-    dataset_val = RundifSequence(data_path=data_path,annotation_path=annotation_path,im_transform=composed_val,mode='val',win_size=win_size,stride=stride,width_par=width_par,include_potential=config['evaluate']['include_potential'],include_potential_gt=config['evaluate']['include_potential_gt'],quick_run=quick_run)
+    use_cross_validation = config['train']['cross_validation']['use_cross_validation']
+    fold_file = config['train']['cross_validation']['fold_file']
+    fold_definition = config['train']['cross_validation']['fold_definition']
+
+    dataset = RundifSequence(data_path=data_path,annotation_path=annotation_path,im_transform=composed,mode='train',win_size=win_size,stride=stride,width_par=width_par,include_potential=config['train']['include_potential'],include_potential_gt=config['train']['include_potential_gt'],quick_run=quick_run,cross_validation=use_cross_validation,fold_file=fold_file,fold_definition=fold_definition)
+    dataset_val = RundifSequence(data_path=data_path,annotation_path=annotation_path,im_transform=composed_val,mode='val',win_size=win_size,stride=stride,width_par=width_par,include_potential=config['evaluate']['include_potential'],include_potential_gt=config['evaluate']['include_potential_gt'],quick_run=quick_run,cross_validation=use_cross_validation,fold_file=fold_file,fold_definition=fold_definition)
 
     data_loader = torch.utils.data.DataLoader(
                                                 dataset,
@@ -102,12 +106,14 @@ def train():
 
     pixel_looser = load_loss(config)
 
-    train_list_ind = [l.tolist() for l in dataset.img_ids_win]
-    val_list_ind = [l.tolist() for l in dataset_val.img_ids_win]
+    train_list_ind = [l.tolist() for l in dataset.img_ids_train_win]
+    val_list_ind = [l.tolist() for l in dataset_val.img_ids_val_win]
+    test_list_ind = [l.tolist() for l in dataset.img_ids_test_win]
 
     data_indices = {}
     data_indices["training"] = train_list_ind
     data_indices["validation"] = val_list_ind
+    data_indices["test"] = test_list_ind
 
     with open(train_path+"indices.json", "w") as f:
         json.dump(data_indices, f)
@@ -352,8 +358,6 @@ def test():
                                             )    
 
     indices_test = dataset.img_ids_win
-
-    sigmoid = nn.Sigmoid()
 
     pred_save = []
 

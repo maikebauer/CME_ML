@@ -93,19 +93,21 @@ def check_diff(diff, len_set, evs, time_dict, win_size):
     flg_bef = 0
     flg_aft = 0
 
-    if (diff[0] > len_set) and (diff[1] > len_set):
+    max_diff = len_set
+
+    if (diff[0] > max_diff) and (diff[1] > max_diff):
         cs = 1
-        ev_ran = np.arange(evs[0]-len_set,evs[-1]+len_set)
+        ev_ran = np.arange(evs[0]-max_diff,evs[-1]+max_diff)
 
-    elif (diff[0] > len_set) and (diff[1] <= len_set):
+    elif (diff[0] > max_diff) and (diff[1] <= max_diff):
         cs = 2
-        ev_ran = np.arange(evs[0]-len_set,evs[-1]+diff[1]-1)
+        ev_ran = np.arange(evs[0]-max_diff,evs[-1]+diff[1]-1)
 
-    elif (diff[0] <= len_set) and (diff[1] > len_set):
+    elif (diff[0] <= max_diff) and (diff[1] > max_diff):
         cs = 3
-        ev_ran = np.arange(evs[0]-diff[0]+1,evs[-1]+len_set)
+        ev_ran = np.arange(evs[0]-diff[0]+1,evs[-1]+max_diff)
 
-    elif (diff[0] <= len_set) and (diff[1] <= len_set):
+    elif (diff[0] <= max_diff) and (diff[1] <= max_diff):
         cs = 4
         ev_ran = np.arange(evs[0]-diff[0]+1,evs[-1]+diff[1]-1)
     else:
@@ -143,7 +145,7 @@ def check_diff(diff, len_set, evs, time_dict, win_size):
         elif flg_bef and (cs == 1 or cs == 3):
             # print('Error: flg_bef = {}, cs = {}'.format(flg_bef, cs))
             # print('Fixing')
-            ev_ran = np.arange(ev_ran[0],ev_ran[-1]+len_set)
+            ev_ran = np.arange(ev_ran[0],ev_ran[-1]+max_diff)
 
             max_ind = np.where(ev_ran == evs[-1])[0][0]
             
@@ -158,7 +160,7 @@ def check_diff(diff, len_set, evs, time_dict, win_size):
         elif flg_aft and (cs == 1 or cs == 2):
             # print('Error: flg_aft = {}, cs = {}'.format(flg_aft, cs))
             # print('Fixing')
-            ev_ran = np.arange(ev_ran[0]-2*len_set,ev_ran[-1])
+            ev_ran = np.arange(ev_ran[0]-2*max_diff,ev_ran[-1])
 
             min_ind = np.where(ev_ran == evs[0])[0][0]
 

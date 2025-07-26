@@ -52,7 +52,7 @@ def post_processing(pred_final, t=0.45, return_labeled=True):
         # Pre-processing
 
         images_proc_thresh[i] = np.where(images_proc_thresh[i] > t, 1, 0)
-        images_proc_thresh[i] = morphology.remove_small_objects(images_proc_thresh[i].astype(bool), min_size=25, connectivity=2)
+        images_proc_thresh[i] = morphology.remove_small_objects(images_proc_thresh[i].astype(bool), min_size=64, connectivity=2)
         images_proc_thresh[i] = morphology.remove_small_holes(images_proc_thresh[i].astype(bool), area_threshold=50, connectivity=2)
         
         images_proc_thresh[i] = images_proc_thresh[i].astype(float)
@@ -298,75 +298,21 @@ def get_front(image_outlines_wcs, image_outline_pixels, fits_headers, image_area
 
                 points = [(xx,yy)  for xx,yy in zip(idx_arr[0,:],idx_arr[1,:])]
 
-                # coords = copy.deepcopy(outline[i])
                 area = copy.deepcopy(image_areas[out_num][i])
-                # area = morphology.remove_small_holes(area.astype(bool), 50, connectivity=2)
-
                 header = copy.deepcopy(fits_headers[out_num])
-                # bin_pa(coords[0], coords[1])
 
-                if(len(points)>3): #and area.sum()>20):
-                    # print('out_num', out_num)
-                    # print('i', i)
-                    # print(len(points))
-                    # print(points)
+                if(len(points)>3):
 
-                    # order the points based on the known first point:
-                    # points_new = order_points(points, 0)
-                    # xn,yn  = np.array(points_new).T
-
-                    #### this is to order the points on the edge part of the mask and plot them as line 
-                    # tck, u = splprep(np.array(points_new).T,  s=2,per=True) 
-                    # u_new = np.linspace(u.min(), u.max(), len(points_new)*2)
-                    # x_new, y_new = splev(u_new, tck, der=0)
-
-                    # x_new_int = np.rint(8.0 * x_new)
-                    # y_new_int = np.rint(8.0 * y_new)
-
-                    # x_new_int = np.clip(x_new_int, 0, 1023).astype(np.uint32)
-                    # y_new_int = np.clip(y_new_int, 0, 1023).astype(np.uint32)
-
-                    # print(np.rint(8.0 * x_new).astype(float))
-                    
-                    # print('------------------')
-
-                    #### this is to create skeleton from binary mask. 
                     skeleton = morphology.skeletonize(area)
                     pruned_skeleton, _, _ = pcv.morphology.prune(skel_img=skeleton.astype(np.uint8), size=10)
                     pruned_coordinates = np.where(pruned_skeleton == 1)
                     skeleton_x = pruned_coordinates[0]
                     skeleton_y = pruned_coordinates[1]
 
-                    # elongs_countour, pas_countour = getwcords_new(header, x_new_int, y_new_int)
                     elongs_skeleton, pas_skeleton = getwcords_new(header, skeleton_x*8, skeleton_y*8)
-
-                    # elongs_countour = elon_reg[x_new_int,y_new_int] 
-                    # pas_countour    = pa_reg[x_new_int,y_new_int]
-
-                    # center_pa_rad, center_elong_rad = bin_pa(np.rad2deg(pas_countour), np.rad2deg(elongs_countour),display=True, date_obs=header['DATE-OBS'])
-
-                    # x_center_pix, y_center_pix = getwcords_pix(header, center_pa_rad, center_elong_rad)
-
-                    # x_center_pix = np.clip(np.round(x_center_pix/8,0).astype(np.uint32), 0, 127)
-                    # y_center_pix = np.clip(np.round(y_center_pix/8,0).astype(np.uint32), 0, 127)
-                    # center_pa_deg = np.rad2deg(center_pa_rad)
-                    # center_elong_deg = np.rad2deg(center_elong_rad)
 
                     center_pa_skeleton_deg = np.rad2deg(pas_skeleton)
                     center_elong_skeleton_deg = np.rad2deg(elongs_skeleton)
-                    # fig,ax = plt.subplots(1,1)
-
-                    # ax.imshow(area, interpolation='none')
-                    # # ax.plot(y_new_int/8.0,x_new_int/8.0,c="pink",alpha=0.9,linewidth=5.0)
-                    # # ax.plot(np.clip(np.round(y_center_pix/8,0),0,127).astype(np.uint32),np.clip(np.round(x_center_pix/8,0),0,127).astype(np.uint32),c="blue",alpha=0.9,linewidth=5.0)
-
-                    # ax.plot(np.clip(np.round(skeleton_y,0),0,127).astype(np.uint32),np.clip(np.round(skeleton_x,0),0,127).astype(np.uint32),c="blue",alpha=0.9,linewidth=5.0)
-                    # plt.show()
-                    # print('Center PA:', center_pa_skeleton_deg, 'Center Elongation:', center_elong_skeleton_deg)
-                    # plt.close()
-                    # plt_imgs = plt_imgs - 1
-                    # if plt_imgs <= 0:
-                    #     sys.exit()
 
                     temp_coords.append([center_pa_skeleton_deg, center_elong_skeleton_deg])
                     temp_pixels.append([np.clip(np.round(skeleton_x,0),0,127).astype(np.uint32), np.clip(np.round(skeleton_y,0),0,127).astype(np.uint32)])
@@ -387,128 +333,6 @@ def get_front(image_outlines_wcs, image_outline_pixels, fits_headers, image_area
     else:
         return img_front_wcs, img_front_pixels
     
-# def get_front(image_outlines_wcs, image_outline_pixels, fits_headers, image_areas=None):
-#     print('Getting front...')
-
-#     img_front_wcs = []
-#     img_front_pixels = []
-#     elon_min = 3.65 # according to STEREO operations document
-
-#     if image_areas is not None:
-#         img_front_areas = []
-
-#     for i, coors in enumerate(image_outlines_wcs):
-
-#         current_header = fits_headers[i]
-#         wcoord = wcs.WCS(current_header)
-
-#         temp_coords = []
-#         temp_pixels = []
-
-#         if image_areas is not None:
-#             temp_areas = []
-
-#         for j, coor in enumerate(coors):
-#             if len(coor[0]) == 0:
-#                 continue
-
-#             pa_vals = coor[0]
-#             elon_vals = coor[1]
-
-#             bins = np.arange(np.floor(np.min(pa_vals)), np.ceil(np.max(pa_vals)), step=1)
-
-#             if len(bins) >= 6:
-#                 #max_coordinates = np.full_like(bins, np.nan, dtype=np.float32)
-#                 # max_pixels_x = np.full_like(bins, np.nan, dtype=np.float32)
-#                 # max_pixels_y = np.full_like(bins, np.nan, dtype=np.float32)
-
-#                 mean_coordinates = np.full_like(bins, np.nan, dtype=np.float32)
-#                 mean_pixels_x = np.full_like(bins, np.nan, dtype=np.float32)
-#                 mean_pixels_y = np.full_like(bins, np.nan, dtype=np.float32)
-
-#                 for k, b in enumerate(bins):
-#                     # Mask for PA values in the bin [b, b+1)
-#                     bin_mask = (pa_vals >= b) & (pa_vals < b + 1)
-
-#                     if np.any(bin_mask):
-#                         elons_in_bin = elon_vals[bin_mask]
-#                         #max_idx = np.argmax(elons_in_bin)
-#                         #max_coordinates[k] = elons_in_bin[max_idx]
-
-#                         # Get corresponding pixel coordinates
-#                         px = image_outline_pixels[i][j][0][bin_mask]
-#                         py = image_outline_pixels[i][j][1][bin_mask]
-
-#                         if len(elons_in_bin) == 1:
-#                             mean_coordinates[k] = np.nanmean([elons_in_bin[0], elon_min])
-
-
-#                             pa_rad_temp = b*np.pi/180
-#                             elon_rad_temp = mean_coordinates[k]*np.pi/180
-#                             tx = np.rad2deg(np.arctan2(-np.sin(elon_rad_temp)*np.sin(pa_rad_temp), np.cos(elon_rad_temp)))
-#                             ty = np.rad2deg(np.arcsin(np.sin(elon_rad_temp)*np.cos(pa_rad_temp)))
-
-#                             pix_y_from_img, pix_x_from_img = wcoord.all_world2pix(tx,ty, 0)
-#                             mean_pixels_x[k] = int(pix_x_from_img/8)
-#                             mean_pixels_y[k] = int(pix_y_from_img/8)
-
-#                         else:
-#                             max_elon = np.nanmax(elons_in_bin)
-#                             mean_front = np.nanmean(elons_in_bin[(elons_in_bin >= max_elon - 1)])  # Take mean of values within 1 degree of max
-
-#                             if len(elons_in_bin[(elons_in_bin < max_elon - 1)]) == 0:
-#                                 mean_back = elon_min
-#                             else:
-#                                 mean_back = np.nanmean(elons_in_bin[(elons_in_bin < max_elon - 1)])  # Take mean of values within 1 degree of max
-                                
-#                             #mean_coordinates[k] = np.nanmean(elons_in_bin)
-#                             mean_coordinates[k] = np.nanmean([mean_front, mean_back])
-#                             # mean_pixels_x[k] = np.nanmean(px)
-#                             # mean_pixels_y[k] = np.nanmean(py)
-
-#                             pa_rad_temp = b*np.pi/180
-#                             elon_rad_temp = mean_coordinates[k]*np.pi/180
-#                             tx = np.rad2deg(np.arctan2(-np.sin(elon_rad_temp)*np.sin(pa_rad_temp), np.cos(elon_rad_temp)))
-#                             ty = np.rad2deg(np.arcsin(np.sin(elon_rad_temp)*np.cos(pa_rad_temp)))
-
-#                             pix_y_from_img, pix_x_from_img = wcoord.all_world2pix(tx,ty, 0)
-#                             mean_pixels_x[k] = int(pix_x_from_img/8)
-#                             mean_pixels_y[k] = int(pix_y_from_img/8)
-
-#                         # max_pixels_x[k] = px[max_idx]
-#                         # max_pixels_y[k] = py[max_idx]
-
-#                 # Interpolate missing elongation values
-#                 valid = ~np.isnan(mean_coordinates)#~np.isnan(max_coordinates)
-#                 if np.sum(valid) >= 2:  # At least two points needed to interpolate
-#                     interp_coords = np.interp(bins, bins[valid], mean_coordinates[valid])#np.interp(bins, bins[valid], max_coordinates[valid])
-#                     # interp_px = np.interp(bins, bins[valid], max_pixels_x[valid])
-#                     # interp_py = np.interp(bins, bins[valid], max_pixels_y[valid])
-#                     interp_px = np.interp(bins, bins[valid], mean_pixels_x[valid])
-#                     interp_py = np.interp(bins, bins[valid], mean_pixels_y[valid])
-#                 else:
-#                     interp_coords = mean_coordinates#max_coordinates  # Too sparse to interpolate
-#                     # interp_px = max_pixels_x
-#                     # interp_py = max_pixels_y
-#                     interp_px = mean_pixels_x
-#                     interp_py = mean_pixels_y
-
-#                 temp_coords.append([bins.copy(), interp_coords])
-#                 temp_pixels.append(np.stack([interp_px.astype(np.uint8), interp_py.astype(np.uint8)]))
-
-#                 if image_areas is not None:
-#                     temp_areas.append(image_areas[i][j])
-
-#         img_front_wcs.append(temp_coords)
-#         img_front_pixels.append(temp_pixels)
-
-#         if image_areas is not None:
-#             img_front_areas.append(temp_areas)
-
-#     if image_areas is not None:
-#         return img_front_wcs, img_front_pixels, img_front_areas
-#     else:
-#         return img_front_wcs, img_front_pixels
 
 class UnionFind:
     def __init__(self, n):

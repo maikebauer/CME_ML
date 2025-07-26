@@ -11,6 +11,7 @@ from extract_fronts_operational import main as extract_fronts_operational_main
 from evaluate_tracking_ml import main as evaluate_tracking_ml_main
 from evaluate_tracking_operational import main as evaluate_tracking_operational_main
 import shutil
+import os
 
 if __name__ == "__main__":
 
@@ -56,6 +57,9 @@ if __name__ == "__main__":
         date_str = now.strftime("%Y%m%d_%H%M%S")
 
         best_segmentation_path = ml_path + 'results_science/'+date_str+'/segmentation_results_science.txt'
+
+    if not os.path.exists(ml_path + 'results_science/'+date_str+ '/'):
+        os.makedirs(ml_path + 'results_science/'+date_str+ '/')
 
     shutil.copy("config_evaluation.yaml", ml_path + "results_science/"+date_str+"/config_evaluation.yaml")
 

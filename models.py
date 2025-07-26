@@ -358,7 +358,7 @@ class CNN3D(nn.Module):
         x_31 = F.relu(self.encoder_conv_31(x_30))
         x_32 = F.relu(self.encoder_conv_32(x_31))
         x_3, indices_3 = F.max_pool3d(x_32, kernel_size=kernels[3], stride=2, return_indices=True)
-        
+
         x_3 = self.dropout(x_3)
         
         # Encoder Stage - 5
@@ -367,8 +367,6 @@ class CNN3D(nn.Module):
         x_41 = F.relu(self.encoder_conv_41(x_40))
         x_42 = F.relu(self.encoder_conv_42(x_41))
         x_4, indices_4 = F.max_pool3d(x_42, kernel_size=kernels[4], stride=2, return_indices=True)
-        
-        # Decoder
 
         # Decoder Stage - 5
         x_4d = F.max_unpool3d(x_4, indices_4, kernel_size=kernels[4], stride=2, output_size=dim_4)
@@ -408,7 +406,6 @@ class CNN3D(nn.Module):
         x_11d = F.relu(self.decoder_convtr_11(x_1d))
         x_10d = self.dropout(F.relu(self.decoder_convtr_10(x_11d)))
 
-
         x_10d = x_10d + x_0
         # x_10d = torch.cat((x_10d, x_0), dim=1)
         # c_10d = nn.Sequential(*[nn.Conv3d(in_channels=x_10d.size()[1],out_channels=indices_0.size()[1],kernel_size=3,padding=1)]).to(x_10d.device)
@@ -416,7 +413,6 @@ class CNN3D(nn.Module):
 
         # Decoder Stage - 1
         x_0d = F.max_unpool3d(x_10d, indices_0, kernel_size=kernels[0], stride=2, output_size=dim_0)
-
         x_01d = F.relu(self.decoder_convtr_01(x_0d))
         x_00d = self.decoder_convtr_00(x_01d) 
 
@@ -495,8 +491,8 @@ class Maike_CNN3D(nn.Module):
         x_00 = F.relu(self.encoder_conv_00(input_img))
         x_01 = F.relu(self.encoder_conv_01(x_00))
         kernels = calc_kernel(x_01.size()[2:], kernel_size=2, depth=5)
+
         x_0, indices_0 = F.max_pool3d(x_01, kernel_size=kernels[0], stride=2, return_indices=True)
-        
         # Encoder Stage - 2
         dim_1 = x_0.size()
         x_10 = F.relu(self.encoder_conv_10(x_0))
@@ -511,14 +507,12 @@ class Maike_CNN3D(nn.Module):
         x_21 = F.relu(self.encoder_conv_21(x_20))
         x_22 = F.relu(self.encoder_conv_22(x_21))
         x_2, indices_2 = F.max_pool3d(x_22, kernel_size=kernels[2], stride=2, return_indices=True)
-
         # Encoder Stage - 4
         dim_3 = x_2.size()
         x_30 = F.relu(self.encoder_conv_30(x_2))
         x_31 = F.relu(self.encoder_conv_31(x_30))
         x_32 = F.relu(self.encoder_conv_32(x_31))
         x_3, indices_3 = F.max_pool3d(x_32, kernel_size=kernels[3], stride=2, return_indices=True)
-        
         x_3 = self.dropout(x_3)
         
         # Encoder Stage - 5
@@ -527,7 +521,6 @@ class Maike_CNN3D(nn.Module):
         x_41 = F.relu(self.encoder_conv_41(x_40))
         x_42 = F.relu(self.encoder_conv_42(x_41))
         x_4, indices_4 = F.max_pool3d(x_42, kernel_size=kernels[4], stride=2, return_indices=True)
-        
         # Decoder
 
         # Decoder Stage - 5

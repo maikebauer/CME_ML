@@ -5,7 +5,7 @@ import numpy as np
 import sys
 import yaml
 import matplotlib.pyplot as plt
-from torchvision.transforms import v2
+from torchvision.transforms import v2, RandomApply
 from models import UNETR_16, CNN3D, ResUnetPlusPlus, Maike_CNN3D
 from losses import AdaptiveWingLoss, DiceBCELoss, AsymmetricFocalLoss, AsymmetricFocalTverskyLoss, AsymmetricUnifiedFocalLoss
 from monai.losses.dice import DiceLoss
@@ -189,7 +189,7 @@ def parse_yml(config_path):
     return content
 
 
-def image_grid(images):
+def image_grid(images, names):
     """
     Plots a grid of images.
     Args:
@@ -200,15 +200,21 @@ def image_grid(images):
     for i in range(len(images)):
         # Start next subplot.
         ax = plt.subplot(8, 8, i + 1)
+        img_text = ax.text(0.22, 0.9, '', transform=ax.transAxes, fontsize=8)
+        img_text.set_bbox(dict(facecolor='red', alpha=0.5, edgecolor='red'))
+
         plt.xticks([])
         plt.yticks([])
         plt.grid(False)
         plt.tight_layout()
 
         if i < 16:
-            plt.imshow(images[i], cmap='gray', vmin=np.median(images[i])-np.std(images[i]), vmax=np.median(images[i])+np.std(images[i]))
+            # Set the title for the subplot.
+            img_text.set_text(names[i][:15])
+            plt.imshow(images[i], cmap='gray', interpolation='none')
+
         else:
-            plt.imshow(images[i], cmap='gray')
+            plt.imshow(images[i], cmap='gray', interpolation='none')
 
     return figure
 
@@ -216,7 +222,6 @@ def image_grid(images):
 def load_augmentations(config):
 
     AUGMENTATION_MAP = {
-    "ToTensor": v2.RandomHorizontalFlip,
     "RandomHorizontalFlip": v2.RandomHorizontalFlip,
     "RandomVerticalFlip": v2.RandomVerticalFlip,
     "RandomAutocontrast": v2.RandomAutocontrast,
@@ -227,6 +232,8 @@ def load_augmentations(config):
     "ToTensor": v2.ToTensor,
     "GaussianBlur": v2.GaussianBlur,
     "ElasticTransform": v2.ElasticTransform,
+    "RandomCrop": v2.RandomCrop,
+    "RandomRotation": v2.RandomRotation
     }
 
     TORCH_DTYPES = {
@@ -238,6 +245,7 @@ def load_augmentations(config):
 
     for aug in config['train']['data_augmentation']:
         name = aug['name']
+
         if name in AUGMENTATION_MAP:
             # Get the class
             aug_class = AUGMENTATION_MAP[name]
@@ -247,19 +255,27 @@ def load_augmentations(config):
             if 'dtype' in params:
                 params['dtype'] = TORCH_DTYPES[params['dtype']]
 
-            # Instantiate the augmentation with its parameters
-            if 'randomize' in params and params['randomize'] > 0:
-                del params['randomize']
-                augmentations.append(v2.RandomApply([aug_class(**params)]))
-            elif 'randomize' in params and params['randomize'] == 0:
-                del params['randomize']
+            if 'p' in params:
                 augmentations.append(aug_class(**params))
-            else:
-                augmentations.append(aug_class(**params))
+
+            elif 'probability' in params:
+                prob = params['probability']
+                del params['probability']
+                augmentations.append(RandomApply(torch.nn.ModuleList([aug_class(**params)]), p=prob))
+
+            # # Instantiate the augmentation with its parameters
+            # if 'p' in params and params['p'] > 0:
+            #     # del params['randomize']
+            #     augmentations.append(v2.RandomApply([aug_class(**params)]))
+            # elif 'p' in params and params['p'] == 0:
+            #     # del params['randomize']
+            #     augmentations.append(aug_class(**params))
+            # else:
+            #     augmentations.append(aug_class(**params))
 
         else:
             raise ValueError(f"Unknown augmentation: {name}")
-        
+
     return v2.Compose(augmentations)
 
 def load_model(config, mode, test_model=''):
@@ -282,12 +298,12 @@ def load_model(config, mode, test_model=''):
         raise ValueError(f"Unknown model: {model_type}")
 
     if (mode == 'train') and (config['train']['load_checkpoint']['load_model']):
-        checkpoint = torch.load(config['train']['load_checkpoint']['checkpoint_path'], weights_only=True)
+        checkpoint = torch.load(config['train']['load_checkpoint']['checkpoint_path'], weights_only=True,map_location='cpu')
         model.load_state_dict(checkpoint['model_state_dict'])
 
     elif (mode == 'test' or mode == 'val'):
         if os.path.exists(test_model):
-            checkpoint = torch.load(test_model, weights_only=True)
+            checkpoint = torch.load(test_model, weights_only=True,map_location='cpu')
             model.load_state_dict(checkpoint['model_state_dict'])
         else:
             raise ValueError(f"Model file not found: {test_model}")

@@ -1,0 +1,49 @@
+---
+mode: test
+method:
+  - median
+  - mean
+  - max
+
+mdls_event_based:
+  - run_27062025_150321_model_cnn3d
+  - run_27062025_150708_model_cnn3d
+  - run_27062025_171628_model_cnn3d
+  - run_30062025_105242_model_cnn3d
+  - run_27062025_154802_model_cnn3d
+
+mdls_operational: run_25062025_120013_model_cnn3d
+
+paths:
+  ml_path: /path/to/Model_Train/
+
+  data_paths:
+    - /path/to/2009_rdifs/
+    - /path/to/2011_rdifs/
+
+  rdif_path: /path/to/event_based_rdifs/
+  annotation_path: /path/to/instances_default.json
+  helcats_path: /path/to/helcats/HCME_WP3_V06_TE_PROFILES/
+  corrected_helcats_path: /path/to/time_corrected/helcats/HCME_WP3_V06_TE_PROFILES_CORRECTED_CSV/
+  fits_path: /path/to/STEREO_A/fits/
+  wp2_path: /path/to/helcats/HCME_WP2_V06.json
+
+time_pairs:
+  start:
+    - '2009_01_01'
+    - '2011_01_01'
+  end:
+    - '2009_12_31'
+    - '2011_12_31'
+
+get_segmentation_masks: True
+plotting: True
+dates_plotting_operational:
+  '2009':
+    - '01'
+    - '02'
+
+  '2011':
+    - '01'
+    - '02'
+

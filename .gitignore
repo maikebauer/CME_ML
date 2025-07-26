@@ -58,13 +58,15 @@ ssw_coco_annotations.json
 ssw_coco_annotations_new.json
 ssw_coco_annotations_elongation.json
 ssw_coco_annotations_new_elongation.json
-*.csv
 mosse.py
 utils_mosse.py
-extract_fronts.py
-extract_fronts_ml.py
-run_test_operational.py
-run_test_ml.py
+run_test_ml_beacon_with_science.py
+run_test_ml_beacon.py
+test_stuff.py
+track_cmes.py
+compare_ssw_cnn_copy.py
+run_job.sh
+config_evaluation.yaml
 
 # Folders to ignore #
 ###################
@@ -76,11 +78,12 @@ Model_Versions/
 Model_Train_Old/
 Model_Test/
 imgs/
-Rand/
+random/
+Jupyter_Notebooks/
 Model_Movies/
 __pycache__/
 runs/
+runs_new/
 Old_Runs/
-compare_ssw_cnn_copy.py
 config.yaml
 *.csv

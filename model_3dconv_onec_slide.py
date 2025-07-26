@@ -6,8 +6,8 @@ import sys
 import os
 from datetime import datetime
 import copy
-from dataset import RundifSequence
-from evaluation import evaluate_onec_slide
+from dataset import RundifSequence, RundifSequenceNew
+from evaluation import evaluate_onec_slide, Kappa_cohen, precision_recall, IoU, dice, Accuracy
 from torch.utils.tensorboard import SummaryWriter
 import json
 from monai.losses.dice import DiceLoss
@@ -32,7 +32,10 @@ def train():
     win_size = config['dataset']['win_size']
     stride = config['dataset']['stride']
     thresh = config['train']['threshold_iou']  
-
+    
+    if type(thresh) is not list:
+        thresh = [thresh]
+    
     backbone = config['model']['name']
     data_parallel = config['train']['data_parallel']
 
@@ -48,9 +51,47 @@ def train():
     fold_file = config['train']['cross_validation']['fold_file']
     fold_definition = config['train']['cross_validation']['fold_definition']
 
-    dataset = RundifSequence(data_path=data_path,annotation_path=annotation_path,im_transform=composed,mode='train',win_size=win_size,stride=stride,width_par=width_par,include_potential=config['train']['include_potential'],include_potential_gt=config['train']['include_potential_gt'],quick_run=quick_run,cross_validation=use_cross_validation,fold_file=fold_file,fold_definition=fold_definition)
-    dataset_val = RundifSequence(data_path=data_path,annotation_path=annotation_path,im_transform=composed_val,mode='val',win_size=win_size,stride=stride,width_par=width_par,include_potential=config['evaluate']['include_potential'],include_potential_gt=config['evaluate']['include_potential_gt'],quick_run=quick_run,cross_validation=use_cross_validation,fold_file=fold_file,fold_definition=fold_definition)
+    try:
+        dataloader_type = config['dataset']['dataloader_parameters']['name']
+    except KeyError:
+        dataloader_type = 'RundifSequence'
 
+    if dataloader_type == "RundifSequenceNew":
+        cadence_minutes = config['dataset']['dataloader_parameters']['cadence_minutes']
+        seed = config['dataset']['dataloader_parameters']['seed']
+
+        dataset = RundifSequenceNew(data_path=data_path,
+                                    annotation_path=annotation_path,
+                                    im_transform=composed,
+                                    mode='train',
+                                    win_size=win_size,
+                                    stride=stride,
+                                    width_par=width_par,
+                                    cadence_minutes=cadence_minutes,
+                                    include_potential=config['train']['include_potential'],
+                                    use_cross_validation=use_cross_validation,
+                                    fold_definition=fold_definition,
+                                    quick_run=quick_run,
+                                    seed=seed)
+        
+        dataset_val = RundifSequenceNew(data_path=data_path,
+                                        annotation_path=annotation_path,
+                                        im_transform=composed_val,
+                                        mode='val',
+                                        win_size=win_size,
+                                        stride=stride,
+                                        width_par=width_par,
+                                        cadence_minutes=cadence_minutes,
+                                        include_potential=config['evaluate']['include_potential'],
+                                        use_cross_validation=use_cross_validation,
+                                        fold_definition=fold_definition,
+                                        quick_run=quick_run,
+                                        seed=seed)
+        
+    else:
+        dataset = RundifSequence(data_path=data_path,annotation_path=annotation_path,im_transform=composed,mode='train',win_size=win_size,stride=stride,width_par=width_par,include_potential=config['train']['include_potential'],include_potential_gt=config['train']['include_potential_gt'],quick_run=quick_run,cross_validation=use_cross_validation,fold_file=fold_file,fold_definition=fold_definition)
+        dataset_val = RundifSequence(data_path=data_path,annotation_path=annotation_path,im_transform=composed_val,mode='val',win_size=win_size,stride=stride,width_par=width_par,include_potential=config['evaluate']['include_potential'],include_potential_gt=config['evaluate']['include_potential_gt'],quick_run=quick_run,cross_validation=use_cross_validation,fold_file=fold_file,fold_definition=fold_definition)
+    
     data_loader = torch.utils.data.DataLoader(
                                                 dataset,
                                                 batch_size=batch_size,
@@ -71,11 +112,11 @@ def train():
     model_seg = load_model(config, mode)
 
     if config['train']['load_checkpoint']['load_model']:
-        checkpoint = torch.load(config['train']['load_checkpoint']['checkpoint_path'], weights_only=True)
-        last_epoch = checkpoint['epoch']
+        checkpoint = torch.load(config['train']['load_checkpoint']['checkpoint_path'], weights_only=True,map_location='cpu')
+        last_epoch = checkpoint['epoch']+1
 
     else:
-        last_epoch = -1
+        last_epoch = 0
 
     if data_parallel:
         model_seg = torch.nn.DataParallel(model_seg)
@@ -106,43 +147,57 @@ def train():
 
     pixel_looser = load_loss(config)
 
-    train_list_ind = [l.tolist() for l in dataset.img_ids_train_win]
-    val_list_ind = [l.tolist() for l in dataset_val.img_ids_val_win]
-    test_list_ind = [l.tolist() for l in dataset.img_ids_test_win]
+    # train_list_ind = [l.tolist() for l in dataset.img_ids_train_win]
+    # val_list_ind = [l.tolist() for l in dataset_val.img_ids_val_win]
+    # test_list_ind = [l.tolist() for l in dataset.img_ids_test_win]
 
-    data_indices = {}
-    data_indices["training"] = train_list_ind
-    data_indices["validation"] = val_list_ind
-    data_indices["test"] = test_list_ind
+    # data_indices = {}
+    # data_indices["training"] = train_list_ind
+    # data_indices["validation"] = val_list_ind
+    # data_indices["test"] = test_list_ind
 
-    with open(train_path+"indices.json", "w") as f:
-        json.dump(data_indices, f)
+    # with open(train_path+"indices.json", "w") as f:
+    #     json.dump(data_indices, f)
 
     shutil.copy("config.yaml", train_path+"config.yaml")
 
     best_iou = -1e99
     num_no_improvement = 0
 
-    log_dir = "runs/" + folder_path[:-1]
+    log_dir = "runs_new/" + folder_path[:-1]
 
     sum_writer = SummaryWriter(log_dir)
     sigmoid = nn.Sigmoid()
 
-    metrics_batch = []
 
-    for epoch in range(last_epoch+1, last_epoch+1+num_iter+1):
+    if config['train']['load_checkpoint']['load_model']:
+        total_epochs = num_iter
+        print(f"Resuming training from epoch {last_epoch} for a total of {total_epochs} epochs.")
+
+        if total_epochs < last_epoch:
+            print(f"Total epochs {total_epochs} is less than last epoch {last_epoch}.")
+            sys.exit()
+
+    else:
+        total_epochs = num_iter
+        print(f"Starting training for {total_epochs} epochs.")
+    
+    for epoch in range(last_epoch, total_epochs+1):
         model_seg.train()
 
         epoch_loss = 0
         epoch_loss_val = 0
 
         batch_loss = 0
+        metrics_batch_confusion = {'TP': 0, 'FP': 0, 'FN': 0, 'TN': 0}
+        # metrics_batch = []
 
         for num, data in enumerate(data_loader):
             g_optimizer_seg.zero_grad()
             
             input_data = data['image'].float().to(device)
             mask_data = data['gt'].float().to(device)
+            name_data = data['names']
 
             if backbone == 'unetr':
                 im_concat = torch.permute(input_data, (0, 2, 3, 4, 1))
@@ -152,6 +207,7 @@ def train():
             elif backbone == 'cnn3d' or backbone == 'resunetpp' or backbone == 'maike_cnn3d':
                 input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
                 mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
+                name_data = np.transpose(name_data, (1,0))
                 pred_comb = model_seg(input_data)
 
                 if config['train']['binary_gt'] == False:
@@ -174,10 +230,22 @@ def train():
             if config['model']['final_layer'].lower() == 'none':
                 pred_comb = sigmoid(pred_comb)
 
-            metrics_batch.append(evaluate_onec_slide(pred_comb.cpu().detach().numpy(), mask_data.cpu().detach().numpy(), thresh=thresh))
+            #metrics_batch.append(evaluate_onec_slide(pred_comb.cpu().detach().numpy(), mask_data.cpu().detach().numpy(), thresh=thresh))
+            metrics_confusion = evaluate_onec_slide(pred_comb.cpu().detach().numpy(), mask_data.cpu().detach().numpy(), thresh=thresh)
 
+            metrics_batch_confusion['TP'] = metrics_batch_confusion['TP'] + metrics_confusion['TP']
+            metrics_batch_confusion['FP'] = metrics_batch_confusion['FP']+ metrics_confusion['FP']
+            metrics_batch_confusion['FN'] = metrics_batch_confusion['FN'] + metrics_confusion['FN']
+            metrics_batch_confusion['TN'] = metrics_batch_confusion['TN'] + metrics_confusion['TN']
 
-        train_metrics = np.nanmean(metrics_batch, axis=0)
+        train_kapa = Kappa_cohen(metrics_batch_confusion['TP'], metrics_batch_confusion['FP'], metrics_batch_confusion['FN'], metrics_batch_confusion['TN'], (width_par,width_par), (width_par,width_par))
+        train_precision, train_recall = precision_recall(metrics_batch_confusion['TP'], metrics_batch_confusion['FP'], metrics_batch_confusion['FN'])
+        train_iou = IoU(metrics_batch_confusion['TP'], metrics_batch_confusion['FP'], metrics_batch_confusion['FN'])
+        train_acc = Accuracy(metrics_batch_confusion['TP'], metrics_batch_confusion['FP'], metrics_batch_confusion['FN'], metrics_batch_confusion['TN'])
+
+        train_metrics = [train_kapa, train_precision, train_recall, train_iou, train_acc]
+
+        # train_metrics = np.nanmean(metrics_batch, axis=0)
         epoch_loss = batch_loss/(num+1)
         sum_writer.add_scalar("Loss/train", epoch_loss, epoch)
 
@@ -189,12 +257,19 @@ def train():
         input_data_train = input_data[0][0].cpu().detach().numpy()
         pred_comb_train = pred_comb[0][0].cpu().detach().numpy()
         mask_data_train = mask_data[0][0].cpu().detach().numpy()
+        name_data_train = name_data[0]
+
+        if len(thresh) == 1:
+            thresh_plot = thresh[0]
+        else:
+            thresh_plot = thresh[int(np.ceil(len(thresh)/2))]
+            
         thresh_data_train = pred_comb_train.copy()
-        thresh_data_train[thresh_data_train >= thresh] = 1
-        thresh_data_train[thresh_data_train < thresh] = 0
+        thresh_data_train[thresh_data_train >= thresh_plot] = 1
+        thresh_data_train[thresh_data_train < thresh_plot] = 0
 
         plot_images_train = np.concatenate((input_data_train, pred_comb_train, thresh_data_train, mask_data_train), axis=0)
-        figure_train = image_grid(plot_images_train)
+        figure_train = image_grid(plot_images_train, name_data_train)
 
         # Convert to image and log
         
@@ -205,7 +280,7 @@ def train():
         with torch.no_grad():
             model_seg.eval()
 
-            val_metrics, epoch_loss_val, input_data_val, pred_comb_val, mask_data_val = evaluate(data_loader_val, model_seg, device, pixel_looser, config, thresh=thresh)
+            val_metrics, epoch_loss_val, input_data_val, pred_comb_val, mask_data_val, name_data_val = evaluate(data_loader_val, model_seg, device, pixel_looser, config, thresh=thresh)
 
             sum_writer.add_scalar("Loss/val", epoch_loss_val, epoch)
 
@@ -217,11 +292,11 @@ def train():
 
             # Prepare the plot
             thresh_data_val = pred_comb_val.copy()
-            thresh_data_val[thresh_data_val >= thresh] = 1
-            thresh_data_val[thresh_data_val < thresh] = 0
+            thresh_data_val[thresh_data_val >= thresh_plot] = 1
+            thresh_data_val[thresh_data_val < thresh_plot] = 0
 
             plot_images_val = np.concatenate((input_data_val, pred_comb_val, thresh_data_val, mask_data_val), axis=0)
-            figure_val = image_grid(plot_images_val)
+            figure_val = image_grid(plot_images_val, name_data_val)
 
             # Convert to image and log
             
@@ -261,7 +336,7 @@ def train():
 
     sum_writer.close()
 
-def evaluate(data_loader, model_seg, device, pixel_looser, config, thresh=0.5):
+def evaluate(data_loader, model_seg, device, pixel_looser, config, thresh=[0.5]):
 
     sigmoid = nn.Sigmoid()
 
@@ -269,12 +344,14 @@ def evaluate(data_loader, model_seg, device, pixel_looser, config, thresh=0.5):
     
     batch_loss = 0
 
-    metrics_batch = []
+    # metrics_batch = []
+    metrics_batch_eval_confusion = {'TP': 0, 'FP': 0, 'FN': 0, 'TN': 0}
 
     for num, data in enumerate(data_loader):
         
         input_data = data['image'].float().to(device)
         mask_data = data['gt'].float().to(device)
+        name_data = data['names']
 
         if backbone == 'unetr':
             im_concat = torch.permute(input_data, (0, 2, 3, 4, 1))
@@ -285,6 +362,7 @@ def evaluate(data_loader, model_seg, device, pixel_looser, config, thresh=0.5):
             input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
             mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
             pred_comb = model_seg(input_data)
+            name_data = np.transpose(name_data, (1,0))
 
             if config['train']['binary_gt'] == False:
                 mask_data_gauss = mask_data.detach().clone()
@@ -306,133 +384,29 @@ def evaluate(data_loader, model_seg, device, pixel_looser, config, thresh=0.5):
         if config['model']['final_layer'].lower() == 'none':
             pred_comb = sigmoid(pred_comb)
         
-        metrics_batch.append(evaluate_onec_slide(pred_comb.cpu().detach().numpy(), mask_data.cpu().detach().numpy(), thresh=thresh))
+        # metrics_batch.append(evaluate_onec_slide(pred_comb.cpu().detach().numpy(), mask_data.cpu().detach().numpy(), thresh=thresh))
+        
+        metrics_confusion = evaluate_onec_slide(pred_comb.cpu().detach().numpy(), mask_data.cpu().detach().numpy(), thresh=thresh)
+        metrics_batch_eval_confusion['TP'] += metrics_confusion['TP']
+        metrics_batch_eval_confusion['FP'] += metrics_confusion['FP']
+        metrics_batch_eval_confusion['FN'] += metrics_confusion['FN']
+        metrics_batch_eval_confusion['TN'] += metrics_confusion['TN']
 
     input_data_plot = input_data[0][0].cpu().detach().numpy()
     pred_comb_plot = pred_comb[0][0].cpu().detach().numpy()
     mask_data_plot = mask_data[0][0].cpu().detach().numpy()
-    
-    metrics = np.nanmean(metrics_batch, axis=0)
+    name_data_plot = name_data[0]
+
+    eval_iou = IoU(metrics_batch_eval_confusion['TP'], metrics_batch_eval_confusion['FP'], metrics_batch_eval_confusion['FN'])
+    eval_kapa = Kappa_cohen(metrics_batch_eval_confusion['TP'], metrics_batch_eval_confusion['FP'], metrics_batch_eval_confusion['FN'], metrics_batch_eval_confusion['TN'], input_data_plot.shape, mask_data_plot.shape)
+    eval_precision, eval_recall = precision_recall(metrics_batch_eval_confusion['TP'], metrics_batch_eval_confusion['FP'], metrics_batch_eval_confusion['FN'])
+    eval_acc = Accuracy(metrics_batch_eval_confusion['TP'], metrics_batch_eval_confusion['FP'], metrics_batch_eval_confusion['FN'], metrics_batch_eval_confusion['TN'])
+    eval_metrics = [eval_kapa, eval_precision, eval_recall, eval_iou, eval_acc]
+
+    #metrics = np.nanmean(metrics_batch, axis=0)
     epoch_loss = batch_loss/(num+1)
 
-    return metrics, epoch_loss, input_data_plot, pred_comb_plot, mask_data_plot
-    
-def test():
-
-    mode = 'test'
-    config = parse_yml('config.yaml')
-
-    device = config['model']['device']
-    batch_size = config['train']['batch_size']
-    num_workers = config['train']['num_workers']
-    width_par = config['dataset']['width']
-
-    win_size = config['dataset']['win_size']
-    stride = config['dataset']['stride']
-    thresh = config['train']['threshold_iou']  
-
-    backbone = config['model']['name']
-    data_parallel = config['train']['data_parallel']
-
-    composed = v2.Compose([v2.ToTensor()])
-
-    quick_run = config['dataset']['quick_run']
-
-    data_path = config['dataset']['data_path']
-    annotation_path = config['dataset']['annotation_path']
-
-    sigmoid = nn.Sigmoid()
-    model_seg = load_model(config, mode)
-
-    model_seg.to(device)
-    model_seg.eval()
-
-    dataset = RundifSequence(data_path=data_path,annotation_path=annotation_path,im_transform=composed,mode='test',win_size=win_size,stride=stride,width_par=width_par,include_potential=config['train']['include_potential'],include_potential_gt=config['train']['include_potential_gt'],quick_run=quick_run)
-
-    data_loader = torch.utils.data.DataLoader(
-                                                dataset,
-                                                batch_size=batch_size,
-                                                shuffle=config['test']['shuffle'],
-                                                num_workers=num_workers,
-                                                pin_memory=False
-                                            )    
-
-    indices_test = dataset.img_ids_win
-
-    pred_save = []
-
-    n_ind = len(set(np.array(indices_test).flatten()))
-
-    input_imgs = np.zeros((n_ind, width_par, width_par))
-    input_masks = np.zeros((n_ind, width_par, width_par))
-
-    for val in range(n_ind):
-        pred_save.append([])
-    
-    num_batch = 0
-
-    ind_keys = sorted(set(np.array(indices_test).flatten()))
-    ind_set = np.arange(0, len(ind_keys))
-    ind_dict = {}
-
-    for A, B in zip(ind_keys, ind_set):
-        ind_dict[A] = B
-
-    for num, data in enumerate(data_loader):
-        
-        input_data = data['image'].float().to(device)
-        mask_data = data['gt'].float().to(device)
-
-        if backbone == 'unetr':
-            
-            im_concat = torch.permute(input_data, (0, 2, 3, 4, 1))
-            pred_comb = model_seg(im_concat)
-            mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
-            input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
-
-        elif backbone == 'cnn3d' or backbone == 'resunetpp' or backbone == 'maike_cnn3d':
-            input_data = torch.permute(input_data, (0, 2, 1, 3, 4))
-            mask_data = torch.permute(mask_data, (0, 2, 1, 3, 4))
-            pred_comb = model_seg(input_data)
-
-        else:
-            print('Invalid backbone...')
-            sys.exit()
-        
-        if config['model']['final_layer'].lower() == 'none':
-            pred_comb = sigmoid(pred_comb)
-
-        for b in range(mask_data.shape[0]):
-            for k in range(win_size):
-                current_ind = ind_dict[indices_test[num_batch][k]]
-                pred_save[current_ind].append(pred_comb[b,0,k,:,:].cpu().detach().numpy())
-
-                if np.all(input_imgs[current_ind]) == 0:
-                    input_imgs[current_ind] = input_data[b,0,k,:,:].cpu().detach().numpy()
-                    input_masks[current_ind] = mask_data[b,0,k,:,:].cpu().detach().numpy()
-
-            num_batch = num_batch + 1
-    
-    input_imgs = np.array(input_imgs)
-
-    for h, pred_arr in enumerate(pred_save):
-        pred_save[h] = np.nanmean(pred_arr,axis=0)
-
-    pred_save = np.array(pred_save)
-    pred_save = torch.Tensor(pred_save)
-    input_imgs = torch.Tensor(input_imgs)
-    input_masks = torch.Tensor(input_masks)
-
-    for t in thresh:
-        metrics = evaluate_onec_slide(pred_save.cpu().detach().numpy(),input_masks.cpu().detach().numpy(), thresh=t)
-
-    metrics_path = '/'.join(config['test']['model_path'].split('/')[:-1])
-
-    if not os.path.exists(metrics_path): 
-        os.makedirs(metrics_path, exist_ok=True) 
-
-    np.save(metrics_path+'metrics.npy', metrics)
-    print(metrics)
+    return eval_metrics, epoch_loss, input_data_plot, pred_comb_plot, mask_data_plot, name_data_plot
 
 if __name__ == "__main__":
 
@@ -443,6 +417,3 @@ if __name__ == "__main__":
 
     if mode == 'train':
         train()
-    
-    elif mode == 'test':
-        test()

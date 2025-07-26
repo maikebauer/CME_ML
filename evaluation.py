@@ -20,21 +20,33 @@ def precision_recall(TP, FP, FN):
 
     if (TP+FN == 0):
         recall = np.nan
+    else:
+        recall    = TP/ (TP+FN)
+        
+    if (TP+FP == 0):
         precision = np.nan
     else:
         precision = TP/ (TP+FP)
-        recall    = TP/ (TP+FN)
 
     return precision,recall
 
 def IoU(TP, FP, FN):
 
-    if (TP+FN == 0):
+    if (TP+FP+FN == 0):
         iou = np.nan
     else:
         iou =  TP/(TP+FP+FN)
 
     return  iou
+
+def dice(TP, FP, FN):
+
+    if (TP+FP+FN == 0):
+        dsc = np.nan
+    else:
+        dsc = 2*TP/(2*TP+FP+FN)
+    
+    return dsc
 
 def Accuracy(TP, FP, FN, TN):
 
@@ -71,15 +83,6 @@ def confusion_metrics(predictions,groundtruth):
     FN   = np.sum(np.logical_and(predictions == 0, groundtruth ==  1))
 
     return  TP, FP, FN, TN
-
-def dice(TP, FP, FN):
-
-    if (TP+FN == 0):
-        dsc = np.nan
-    else:
-        dsc = 2*TP/(2*TP+FP+FN)
-    
-    return dsc
 
 def evaluate_basic(pred, gt, img, model_name, folder_path, data_num, epoch=None):
 
@@ -149,33 +152,50 @@ def evaluate_basic(pred, gt, img, model_name, folder_path, data_num, epoch=None)
 
     return metrics
 
-def evaluate_onec_slide(pred, gt, thresh=0.5):
+def evaluate_onec_slide(pred, gt, thresh=[0.5]):
 
-    metrics = []
+    # metrics = []
+    metrics_confusion = {'TP': [], 'FP': [], 'FN': [], 'TN': []}
+    pred = pred.reshape((pred.shape[0]*pred.shape[2],pred.shape[3],pred.shape[4]))
+    gt = gt.reshape((gt.shape[0]*gt.shape[2],gt.shape[3],gt.shape[4]))
 
-    # plot_num = 0
-    
-    for p, res in enumerate(pred):
+    for t in thresh:
+        # metrics_thresh = []
+        metrics_confusion_thresh = {'TP': 0, 'FP': 0, 'FN': 0, 'TN': 0}
+        for p, res in enumerate(pred):
+            gt_win = gt[p].copy()
+            mask_pred = res.copy()
 
-        gt_win = gt[p].copy()
-        mask_pred = res.copy()
+            gt_win[gt_win >= t] = 1
+            gt_win[gt_win < t] = 0
+            
+            mask_pred[mask_pred >= t] = 1
+            mask_pred[mask_pred < t] = 0
 
-        gt_win[gt_win >= thresh] = 1
-        gt_win[gt_win < thresh] = 0
-        
-        mask_pred[mask_pred >= thresh] = 1
-        mask_pred[mask_pred < thresh] = 0
-        
-        TP, FP, FN, TN = confusion_metrics(mask_pred,gt_win)
-        #computing metrics
-        kapa = Kappa_cohen(TP, FP, FN, TN, mask_pred.shape, gt_win.shape) ## kinda accuracy but for masks with a lot of background and small mask areas
-        precision,recall = precision_recall(TP, FP, FN) #precision recall at different thresholds for doing a precision recall curve plot
-        iou = IoU(TP, FP, FN) ## main metric to look at, take the mean over dataset or over thresholds 
-        acc = Accuracy(TP, FP, FN, TN) #no need to explain
-        #confusion_matrix = [[TP, FN], [FP, TN]]
+            TP, FP, FN, TN = confusion_metrics(mask_pred,gt_win)
 
-        metrics.append([kapa,precision,recall,iou,acc])
-    
-    metrics = np.nanmean(metrics, axis=0)
+            # #computing metrics
+            # kapa = Kappa_cohen(TP, FP, FN, TN, mask_pred.shape, gt_win.shape) ## kinda accuracy but for masks with a lot of background and small mask areas
+            # precision,recall = precision_recall(TP, FP, FN) #precision recall at different thresholds for doing a precision recall curve plot
+            # iou = IoU(TP, FP, FN) ## main metric to look at, take the mean over dataset or over thresholds 
+            # acc = Accuracy(TP, FP, FN, TN) #no need to explain
+            # #confusion_matrix = [[TP, FN], [FP, TN]]
 
-    return metrics
+            metrics_confusion_thresh['TP'] += TP
+            metrics_confusion_thresh['FP'] += FP
+            metrics_confusion_thresh['FN'] += FN
+            metrics_confusion_thresh['TN'] += TN
+
+            # metrics_thresh.append([kapa,precision,recall,iou,acc])
+
+        metrics_confusion['TP'].append(metrics_confusion_thresh['TP'])
+        metrics_confusion['FP'].append(metrics_confusion_thresh['FP'])
+        metrics_confusion['FN'].append(metrics_confusion_thresh['FN'])
+        metrics_confusion['TN'].append(metrics_confusion_thresh['TN'])
+
+        # metrics.append(np.nanmean(metrics_thresh, axis=0))
+
+    metrics_confusion = {key: np.nanmean(value) for key, value in metrics_confusion.items()}
+    # metrics = np.nanmean(metrics, axis=0)
+
+    return metrics_confusion #, metrics

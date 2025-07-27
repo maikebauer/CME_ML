@@ -80,14 +80,14 @@ if __name__ == "__main__":
     extract_fronts_ml_main(mdls=mdls_event_based, ml_path=ml_path, annotation_path=annotation_path, best_threshold=best_threshold, best_method=best_method, mode=mode)
     extract_fronts_operational_main(mdl=mdls_operational, ml_path=ml_path, timepairs=timepairs, helcats_path=helcats_path, corrected_helcats_path=corrected_helcats_path, fits_path=fits_path, best_method=best_method, best_threshold=best_threshold)
 
-    evaluate_tracking_ml_main(mdls=mdls_event_based, ml_path=ml_path, best_method=best_method, best_threshold=best_threshold, date_now=date_str, mode=mode, plotting=plotting, rdif_path=rdif_path, img_size=config["img_size"])
+    evaluate_tracking_ml_main(mdls=mdls_event_based, ml_path=ml_path, best_method=best_method, best_threshold=best_threshold, date_str=date_str, mode=mode, plotting=plotting, rdif_path=rdif_path, img_size=config["img_size"])
 
     evaluate_tracking_operational_main(mdl=mdls_operational, 
         ml_path=ml_path, 
         timepairs=timepairs, 
         best_method=best_method, 
         best_threshold=best_threshold, 
-        date_now=date_str,
+        date_str=date_str,
         wp2_path=wp2_path,
         plotting=plotting, 
         plot_area=False, 

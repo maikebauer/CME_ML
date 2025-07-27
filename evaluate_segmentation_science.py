@@ -21,7 +21,7 @@ from scipy.optimize import linear_sum_assignment
 from utils_evaluation import load_results, post_processing
 from evaluation import IoU, precision_recall, dice
 
-def main(mdls, ml_path, date_str, mode='test', methods=['median', 'mean', 'max'], plotting=False, rdif_path=None):
+def main(mdls, ml_path, date_str, mode='test', methods=['median', 'mean', 'max'], plotting=False, rdif_path=None, img_size=128):
 
     if plotting and rdif_path is None:
         print('Plotting is enabled, but no path to the differences is provided. Please provide a valid path.')
@@ -57,7 +57,7 @@ def main(mdls, ml_path, date_str, mode='test', methods=['median', 'mean', 'max']
             TP_all = 0
             FP_all = 0
             FN_all = 0
-            pred_processed = post_processing(pred, t=t, return_labeled=False)
+            pred_processed = post_processing(pred, t=t, return_labeled=False) 
 
             for i in range(len(pred_processed)):
 
@@ -239,15 +239,20 @@ def main(mdls, ml_path, date_str, mode='test', methods=['median', 'mean', 'max']
         FP_img = np.logical_and(pred_processed == 1, gt == 0).astype(int)
         FN_img = np.logical_and(pred_processed == 0, gt ==  1).astype(int)
 
+        if(img_size!=128):
+            TP_img = transform.resize(np.flipud(TP_img), (img_size,img_size)).astype(int)
+            FP_img = transform.resize(np.flipud(FP_img), (img_size,img_size)).astype(int) 
+            FN_img =transform.resize(np.flipud(FN_img), (img_size,img_size)).astype(int) 
+
         imgs = []
 
         for i in range(len(filenames)):
             
             try:
-                imgs.append(transform.resize(np.load(filenames[i]), (128,128)))
+                imgs.append(transform.resize(np.load(filenames[i]), (img_size,img_size)))
 
             except FileNotFoundError:
-                imgs.append(np.zeros((128,128)))
+                imgs.append(np.zeros((img_size,img_size)))
 
 
         # Create a grid of subplots with r rows and c columns
@@ -294,16 +299,16 @@ def main(mdls, ml_path, date_str, mode='test', methods=['median', 'mean', 'max']
                     axes[row, col].axis('off')
                     
                     # Add text in the top middle of each image (not as a title)
-                    axes[row, col].text(
-                        0.5, 0.05, 
-                        f'{filenames[init+i].split("/")[-1].split(".")[0][:15]}', 
-                        fontsize=10, 
-                        color='white', 
-                        ha='center', 
-                        va='bottom', 
-                        transform=axes[row, col].transAxes,
-                        bbox=dict(facecolor='black', alpha=0.5, edgecolor='none', boxstyle='round,pad=0.2')
-                    )
+                    # axes[row, col].text(
+                    #     0.5, 0.05, 
+                    #     f'{filenames[init+i].split("/")[-1].split(".")[0][:15]}', 
+                    #     fontsize=10, 
+                    #     color='white', 
+                    #     ha='center', 
+                    #     va='bottom', 
+                    #     transform=axes[row, col].transAxes,
+                    #     bbox=dict(facecolor='black', alpha=0.5, edgecolor='none', boxstyle='round,pad=0.2')
+                    # )
                     axes[row,col].set_frame_on(False)
 
                 # Adjust the spacing between subplots
@@ -331,4 +336,4 @@ if __name__ == "__main__":
     now = datetime.now()
     date_str = now.strftime("%Y%m%d_%H%M%S")
     
-    main(mdls=mdls_event_based, ml_path=ml_path, date_str=date_str, mode=mode, methods=methods, plotting=plotting, rdif_path=rdif_path)
+    main(mdls=mdls_event_based, ml_path=ml_path, date_str=date_str, mode=mode, methods=methods, plotting=plotting, rdif_path=rdif_path, img_size=config['img_size'])

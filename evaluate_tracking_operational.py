@@ -190,7 +190,8 @@ def plot_tracking_grid_gap(
     save_path,
     gap=1,
     segmentation_dictionary=None,
-    use_threshold=None
+    use_threshold=None,
+    img_size=128
 ):
 
     os.makedirs(save_path,exist_ok=True)
@@ -240,7 +241,8 @@ def plot_tracking_grid_gap(
             ax.imshow(np.flipud(img), aspect='equal', cmap='gray', vmin=np.nanmedian(img)-0.4*np.nanstd(img), vmax=np.nanmedian(img)+0.4*np.nanstd(img),extent=(0, img.shape[1], img.shape[0], 0), interpolation='none')
             
             if segmentation_dictionary is not None:
-
+                
+                seg_mask = transform.resize(segmentation_dictionary[dt], (img_size, img_size), anti_aliasing=True)
                 if use_threshold == True:
                     geo_red = (204/255,44/255,1/255)
                     c_black = mpl_colors.colorConverter.to_rgba('black',alpha=0)
@@ -256,6 +258,11 @@ def plot_tracking_grid_gap(
                 img_dim = img.shape[0]
                 xcoords = front['x_coords']
                 ycoords = front['y_coords']
+
+                if img_size != 128:
+                    xcoords = np.clip(xcoords*8.0, 0, img_size-1).astype(int)
+                    ycoords = np.clip(ycoords*8.0, 0, img_size-1).astype(int)
+
                 label = front['label']
                 color = c_purple if label == "TP" else c_pink
                 ax.scatter(xcoords, img_dim-ycoords, s=10, color=color, label=label, alpha=0.9, marker='x')
@@ -264,29 +271,34 @@ def plot_tracking_grid_gap(
                 img_dim = img.shape[0]
                 xcoords = front['x_coords']
                 ycoords = front['y_coords']
+
+                if img_size != 128:
+                    xcoords = np.clip(xcoords*8.0, 0, img_size-1).astype(int)
+                    ycoords = np.clip(ycoords*8.0, 0, img_size-1).astype(int)
+
                 label = front['label']
                 color = c_orange if label == "FN" else c_tp_gt
                 ax.scatter(xcoords, img_dim-ycoords, s=25, color=color, label=label, alpha=0.9, marker='*', edgecolors='face',linewidths=2) 
 
 
             # Add text in the top middle of each image (not as a title)
-            ax.text(
-                0.5, 0.05, 
-                datetime.datetime.strftime(dt, '%Y%m%d_%H%M%S'), 
-                fontsize=10, 
-                color='white', 
-                ha='center', 
-                va='bottom', 
-                transform=ax.transAxes,
-                bbox=dict(facecolor='black', alpha=0.5, edgecolor='none', boxstyle='round,pad=0.2')
-            )
+            # ax.text(
+            #     0.5, 0.05, 
+            #     datetime.datetime.strftime(dt, '%Y%m%d_%H%M%S'), 
+            #     fontsize=10, 
+            #     color='white', 
+            #     ha='center', 
+            #     va='bottom', 
+            #     transform=ax.transAxes,
+            #     bbox=dict(facecolor='black', alpha=0.5, edgecolor='none', boxstyle='round,pad=0.2')
+            # )
             #ax.text(.01, .99, dt.strftime('%Y-%m-%d %H:%M'), ha='left', va='top', fontsize=8, transform=ax.transAxes)
             
             #ax.set_title(dt.strftime('%Y-%m-%d %H:%M'), fontsize=8)
             ax.axis('off')
             ax.set_frame_on(False)
 
-        if use_threshold == False:
+        if segmentation_dictionary is not None and use_threshold == False:
             fig.colorbar(color_img, ax=axes, location='right', anchor=(0, 0.5),shrink=0.5)
             
         #plt.tight_layout()
@@ -294,7 +306,7 @@ def plot_tracking_grid_gap(
         #plt.show()
         plt.close()
 
-def main(mdl, ml_path, timepairs, best_method, best_threshold, date_str, wp2_path, plotting=False, plot_area=False, use_threshold=True, years_plotting=None, months_plotting=None, data_paths=None):
+def main(mdl, ml_path, timepairs, best_method, best_threshold, date_str, wp2_path, plotting=False, plot_area=False, use_threshold=True, years_plotting=None, months_plotting=None, data_paths=None, img_size=128):
 
     filenames_final = []
 
@@ -501,7 +513,7 @@ def main(mdl, ml_path, timepairs, best_method, best_threshold, date_str, wp2_pat
                 input_imgs = []
 
                 for file in img_paths:
-                    input_imgs.append(transform.resize(np.load(file), (128,128)))
+                    input_imgs.append(transform.resize(np.load(file), (img_size,img_size)))
 
                     input_dates_datetime = [datetime.datetime.strptime(name.split('/')[-1][:15], '%Y%m%d_%H%M%S') for name in filenames if name.split('/')[-1]]
                     input_dates_datetime_plot = [datetime.datetime.strptime(name.split('/')[-1][:15], '%Y%m%d_%H%M%S') for name in filenames if name.split('/')[-1].startswith(year+month)]
@@ -514,9 +526,10 @@ def main(mdl, ml_path, timepairs, best_method, best_threshold, date_str, wp2_pat
                                 fronts_by_date,
                                 fronts_by_date_gt,
                                 save_path=ml_path+'results_science/'+date_str+'/'+'operational_tracking_imgs_'+start+'_'+end+'_'+mdl+path_append,
-                                gap=1,
+                                gap=3,
                                 segmentation_dictionary=segmentation_dictionary,
-                                use_threshold=use_threshold)
+                                use_threshold=use_threshold,
+                                img_size=img_size)
 
 
 if __name__ == '__main__':
@@ -568,5 +581,6 @@ if __name__ == '__main__':
          use_threshold=True, 
          years_plotting=years_plotting_operational, 
          months_plotting=months_plotting_operational,
-         data_paths=data_paths
+         data_paths=data_paths,
+         img_size=config['img_size']
          )

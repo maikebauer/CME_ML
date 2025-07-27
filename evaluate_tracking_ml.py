@@ -224,7 +224,8 @@ def plot_segmentation_and_tracking_grid_gap(
     segmentation_results_by_date,
     fronts_by_date,
     save_path,
-    gap=1
+    gap=1,
+    img_size = 128
 ):
 
     os.makedirs(save_path, exist_ok=True)
@@ -275,31 +276,40 @@ def plot_segmentation_and_tracking_grid_gap(
             ax = axes[j]
             ax.imshow(np.flipud(img), aspect='equal', cmap='gray', vmin=np.nanmedian(img)-0.35*np.nanstd(img), vmax=np.nanmedian(img)+0.35*np.nanstd(img), extent=(0, img.shape[1], img.shape[0], 0),interpolation='none')
 
+            if(img_size!=128):
+                tp = transform.resize(np.flipud(seg_res['tp']), (img_size,img_size)).astype(int)
+                fp = transform.resize(np.flipud(seg_res['fp']), (img_size,img_size)).astype(int) 
+                fn =transform.resize(np.flipud(seg_res['fn']), (img_size,img_size)).astype(int) 
             # Segmentation overlays
-            ax.imshow(np.flipud(seg_res['tp']).astype(int), cmap=cmap_tp, alpha=0.4, interpolation='none', extent=(0, img.shape[1], img.shape[0], 0))
-            ax.imshow(np.flipud(seg_res['fp']).astype(int), cmap=cmap_fp, alpha=0.4, interpolation='none', extent=(0, img.shape[1], img.shape[0], 0))
-            ax.imshow(np.flipud(seg_res['fn']).astype(int), cmap=cmap_fn, alpha=0.4, interpolation='none', extent=(0, img.shape[1], img.shape[0], 0))
+            ax.imshow(tp, cmap=cmap_tp, alpha=0.4, interpolation='none', extent=(0, img.shape[1], img.shape[0], 0))
+            ax.imshow(fp, cmap=cmap_fp, alpha=0.4, interpolation='none', extent=(0, img.shape[1], img.shape[0], 0))
+            ax.imshow(fn, cmap=cmap_fn, alpha=0.4, interpolation='none', extent=(0, img.shape[1], img.shape[0], 0))
 
             # Tracking overlays: plot fronts
             for front in fronts:
                 img_dim = img.shape[0]
                 xcoords = front['x_coords']
                 ycoords = front['y_coords']
+
+                if(img_size!=128):
+                    xcoords = np.clip(xcoords*8.0, 0, img_size-1).astype(int)
+                    ycoords = np.clip(ycoords*8.0, 0, img_size-1).astype(int)
+
                 label = front['label']
                 color = c_purple if label == "TP" else c_pink
                 ax.scatter(xcoords, img_dim-ycoords, s=10, color=color, label=label, alpha=0.9, marker='x')
 
             # Add text in the top middle of each image (not as a title)
-            ax.text(
-                0.5, 0.05, 
-                datetime.datetime.strftime(dt, '%Y%m%d_%H%M%S'), 
-                fontsize=10, 
-                color='white', 
-                ha='center', 
-                va='bottom', 
-                transform=ax.transAxes,
-                bbox=dict(facecolor='black', alpha=0.5, edgecolor='none', boxstyle='round,pad=0.2')
-            )
+            # ax.text(
+            #     0.5, 0.05, 
+            #     datetime.datetime.strftime(dt, '%Y%m%d_%H%M%S'), 
+            #     fontsize=10, 
+            #     color='white', 
+            #     ha='center', 
+            #     va='bottom', 
+            #     transform=ax.transAxes,
+            #     bbox=dict(facecolor='black', alpha=0.5, edgecolor='none', boxstyle='round,pad=0.2')
+            # )
 
             ax.axis('off')
             ax.set_frame_on(False)
@@ -309,7 +319,7 @@ def plot_segmentation_and_tracking_grid_gap(
 
         plt.close()
 
-def main(mdls, ml_path, best_method, best_threshold, date_str, mode='test', plotting=False, rdif_path=None):
+def main(mdls, ml_path, best_method, best_threshold, date_str, mode='test', plotting=False, rdif_path=None,img_size=128):
 
     final_mae_start = []
     final_mae_end = []
@@ -324,7 +334,8 @@ def main(mdls, ml_path, best_method, best_threshold, date_str, mode='test', plot
     filenames_final = []
 
     folder_save = ml_path + 'results_science/' + date_str + '/'
-
+    # folder_save = '/home/lelouedec/testml/results_science/' + date_str + '/'
+    
     os.makedirs(folder_save, exist_ok=True)
 
     for mdl in mdls:
@@ -369,7 +380,6 @@ def main(mdls, ml_path, best_method, best_threshold, date_str, mode='test', plot
         print('Best Threshold:', str(best_threshold), file=f)
 
     if plotting:
-
         best_mdl = mdls[np.argmax(final_iou)]
         load_path = ml_path+best_mdl+'/segmentation_masks_'+best_method+'_'+mode+'.npz'
         
@@ -386,7 +396,8 @@ def main(mdls, ml_path, best_method, best_threshold, date_str, mode='test', plot
 
         input_imgs = []
         for file in img_paths:
-            input_imgs.append(transform.resize(np.load(file), (128,128)))
+            input_imgs.append(transform.resize(np.load(file), (img_size,img_size)))
+
 
         input_dates_datetime = [datetime.datetime.strptime(name.split('/')[-1][:15], '%Y%m%d_%H%M%S') for name in filenames if name.split('/')[-1]]
 
@@ -399,7 +410,8 @@ def main(mdls, ml_path, best_method, best_threshold, date_str, mode='test', plot
         seg_by_date,
         fronts_by_date,
         save_path=folder_save+'event_based_tracking_imgs_'+best_mdl+'/',
-        gap=3
+        gap=3,
+        img_size=img_size
         )
 
 if __name__ == '__main__':
@@ -432,4 +444,4 @@ if __name__ == '__main__':
         date_str = now.strftime("%Y%m%d_%H%M%S")
 
 
-    main(mdls=mdls_event_based, ml_path=ml_path, best_method=best_method, best_threshold=best_threshold, date_str=date_str, mode=mode, plotting=plotting, rdif_path=rdif_path)
+    main(mdls=mdls_event_based, ml_path=ml_path, best_method=best_method, best_threshold=best_threshold, date_str=date_str, mode=mode, plotting=plotting, rdif_path=rdif_path,img_size=config["img_size"])

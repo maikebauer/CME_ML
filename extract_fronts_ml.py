@@ -47,6 +47,7 @@ def main(mdls, ml_path, annotation_path, best_threshold, best_method, mode='test
 
         load_path = ml_base_path + 'segmentation_masks_'+best_method+'_'+mode+'.npz'
         save_path = ml_base_path + 'segmentation_dictionary_'+best_method+'_'+mode+'_'+str(best_threshold).split('.')[-1]+'.npy'
+
         save_path_gt = ml_base_path + 'segmentation_dictionary_gt_'+mode+'.npy'
 
         create_dictionaries(load_path, save_path, save_path_gt, annotation_path, t=best_threshold)

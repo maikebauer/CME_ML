@@ -66,7 +66,7 @@ if __name__ == "__main__":
     if get_segmentation_masks:
         run_test_ml_main(mdls=mdls_event_based, ml_path=ml_path, mode=mode)
 
-    evaluate_segmentation_science_main(mdls=mdls_event_based, ml_path=ml_path, date_str=date_str, mode=mode, methods=methods, plotting=plotting, rdif_path=rdif_path)
+    evaluate_segmentation_science_main(mdls=mdls_event_based, ml_path=ml_path, date_str=date_str, mode=mode, methods=methods, plotting=plotting, rdif_path=rdif_path, img_size=config["img_size"])
 
     with open(best_segmentation_path, 'r') as f:
         lines = f.readlines()
@@ -80,7 +80,7 @@ if __name__ == "__main__":
     extract_fronts_ml_main(mdls=mdls_event_based, ml_path=ml_path, annotation_path=annotation_path, best_threshold=best_threshold, best_method=best_method, mode=mode)
     extract_fronts_operational_main(mdl=mdls_operational, ml_path=ml_path, timepairs=timepairs, helcats_path=helcats_path, corrected_helcats_path=corrected_helcats_path, fits_path=fits_path, best_method=best_method, best_threshold=best_threshold)
 
-    evaluate_tracking_ml_main(mdls=mdls_event_based, ml_path=ml_path, best_method=best_method, best_threshold=best_threshold, date_now=date_str, mode=mode, plotting=plotting, rdif_path=rdif_path)
+    evaluate_tracking_ml_main(mdls=mdls_event_based, ml_path=ml_path, best_method=best_method, best_threshold=best_threshold, date_now=date_str, mode=mode, plotting=plotting, rdif_path=rdif_path, img_size=config["img_size"])
 
     evaluate_tracking_operational_main(mdl=mdls_operational, 
         ml_path=ml_path, 
@@ -94,5 +94,6 @@ if __name__ == "__main__":
         use_threshold=True, 
         years_plotting=years_plotting_operational, 
         months_plotting=months_plotting_operational,
-        data_paths=data_paths
+        data_paths=data_paths,
+        img_size=config['img_size']
         )

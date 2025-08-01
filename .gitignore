@@ -42,7 +42,6 @@ Thumbs.db
 
 # Jupyter Notebooks, Test files #
 ###################
-*.ipynb
 *.png
 *.pth
 output.txt
@@ -67,6 +66,7 @@ track_cmes.py
 compare_ssw_cnn_copy.py
 run_job.sh
 config_evaluation.yaml
+*.ipynb
 
 # Folders to ignore #
 ###################

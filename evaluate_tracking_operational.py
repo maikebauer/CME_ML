@@ -216,6 +216,7 @@ def plot_tracking_grid_gap(
     num_figs = math.ceil(total / num_per_fig)
     figsize = (num_cols * 2, num_rows * 2)
 
+    fac = 1.5
     for i in range(num_figs):
         fig, axes = plt.subplots(num_rows, num_cols, figsize=figsize)
         fig.subplots_adjust(wspace=0, hspace=0, left=0, right=1, top=1, bottom=0)
@@ -238,7 +239,7 @@ def plot_tracking_grid_gap(
                 seg_mask = segmentation_dictionary.get(dt, np.zeros_like(img))
 
             ax = axes[j]
-            ax.imshow(np.flipud(img), aspect='equal', cmap='gray', vmin=np.nanmedian(img)-0.4*np.nanstd(img), vmax=np.nanmedian(img)+0.4*np.nanstd(img),extent=(0, img.shape[1], img.shape[0], 0), interpolation='none')
+            ax.imshow(np.flipud(img), aspect='equal', cmap='gray', vmin=np.nanmedian(img)-fac*np.nanstd(img), vmax=np.nanmedian(img)+fac*np.nanstd(img),extent=(0, img.shape[1], img.shape[0], 0), interpolation='none')
             
             if segmentation_dictionary is not None:
                 
@@ -376,7 +377,7 @@ def main(mdl, ml_path, timepairs, best_method, best_threshold, date_str, wp2_pat
                 }
 
         unmatched_prediction_dict = {key: value for key, value in prediction_dict.items() if key not in matches.keys()}
-        matches_extra, unmatched_gt_extra, unmatched_pred_extra = match_cmes_extra(wp2_reduced, unmatched_prediction_dict, time_threshold=6)
+        matches_extra, unmatched_gt_extra, unmatched_pred_extra = match_cmes_extra(wp2_reduced, unmatched_prediction_dict, time_threshold=200)
 
         wp2_all_data = {}
         wp2_all_data =  defaultdict(lambda: {'CME': str, 'time_start': str, 'PA_min': int, 'PA_max': int, 'SC': str, 'quality':str})
@@ -461,7 +462,7 @@ def main(mdl, ml_path, timepairs, best_method, best_threshold, date_str, wp2_pat
                     binary_range_plot[i*np.shape(binary_range)[1]+j] = binary_range[i][j]
 
             date_range = pd.date_range(start=start_datetime, end=end_datetime, freq='ME')
-            date_labels = [datetime.datetime.strftime(dt, '%Y_%m') for dt in date_range]
+            date_labels = [datetime.datetime.strftime(dt, '%Y/%m') for dt in date_range]
 
             SMALL_SIZE = 8
             MEDIUM_SIZE = 12
@@ -483,7 +484,7 @@ def main(mdl, ml_path, timepairs, best_method, best_threshold, date_str, wp2_pat
             ax.set_yticks(range(1,13))
             #ax.set_yticklabels(calendar.month_abbr[1:13])
             ax.set_yticklabels(date_labels)
-            ax.set_ylabel('Month', fontsize=BIGGER_SIZE)
+            ax.set_ylabel('Year/Month', fontsize=BIGGER_SIZE)
             ax.set_xlabel('Day', fontsize=BIGGER_SIZE)
             ax.set_xticks(range(1,32))
             ax.tick_params(axis='both', which='major', labelsize=MEDIUM_SIZE)
@@ -503,33 +504,38 @@ def main(mdl, ml_path, timepairs, best_method, best_threshold, date_str, wp2_pat
             plt.savefig(ml_path+'results_science/'+date_str+'/heatmap_'+start+'_'+end+'_'+mdl+'.jpg', dpi=300, bbox_inches='tight')
             plt.close()
 
-            year = years_plotting[pair_idx]
-            for month in months_plotting[pair_idx]:
-                print('Plotting for year: ' + year + ' and month: ' + month)
-                input_dates_plot = [datetime.datetime.strptime(name.split('/')[-1][:15], '%Y%m%d_%H%M%S').strftime('%Y%m%d_%H%M%S') for name in filenames if name.split('/')[-1].startswith(year+month)]
+            if years_plotting is None or months_plotting is None:
+                print('No years or months to plot. Skipping plotting.')
+                continue
 
-                img_paths = [data_paths[pair_idx] + tim + '_1bh1A.npy' for tim in input_dates_plot]
+            else:
+                year = years_plotting[pair_idx]
+                for month in months_plotting[pair_idx]:
+                    print('Plotting for year: ' + year + ' and month: ' + month)
+                    input_dates_plot = [datetime.datetime.strptime(name.split('/')[-1][:15], '%Y%m%d_%H%M%S').strftime('%Y%m%d_%H%M%S') for name in filenames if name.split('/')[-1].startswith(year+month)]
 
-                input_imgs = []
+                    img_paths = [data_paths[pair_idx] + tim + '_1bh1A.npy' for tim in input_dates_plot]
 
-                for file in img_paths:
-                    input_imgs.append(transform.resize(np.load(file), (img_size,img_size)))
+                    input_imgs = []
 
-                    input_dates_datetime = [datetime.datetime.strptime(name.split('/')[-1][:15], '%Y%m%d_%H%M%S') for name in filenames if name.split('/')[-1]]
-                    input_dates_datetime_plot = [datetime.datetime.strptime(name.split('/')[-1][:15], '%Y%m%d_%H%M%S') for name in filenames if name.split('/')[-1].startswith(year+month)]
+                    for file in img_paths:
+                        input_imgs.append(transform.resize(np.load(file), (img_size,img_size)))
 
-                fronts_by_date = collect_tracking_fronts_by_date(input_dates_datetime, prediction_dict, matches, unmatched_pred, 'pred')
-                fronts_by_date_gt = collect_tracking_fronts_by_date(input_dates_datetime, groundtruth_dict, matches, unmatched_gt, 'gt')
-                
-                plot_tracking_grid_gap(input_dates_datetime_plot,
-                                input_imgs,
-                                fronts_by_date,
-                                fronts_by_date_gt,
-                                save_path=ml_path+'results_science/'+date_str+'/'+'operational_tracking_imgs_'+start+'_'+end+'_'+mdl+path_append,
-                                gap=3,
-                                segmentation_dictionary=segmentation_dictionary,
-                                use_threshold=use_threshold,
-                                img_size=img_size)
+                        input_dates_datetime = [datetime.datetime.strptime(name.split('/')[-1][:15], '%Y%m%d_%H%M%S') for name in filenames if name.split('/')[-1]]
+                        input_dates_datetime_plot = [datetime.datetime.strptime(name.split('/')[-1][:15], '%Y%m%d_%H%M%S') for name in filenames if name.split('/')[-1].startswith(year+month)]
+
+                    fronts_by_date = collect_tracking_fronts_by_date(input_dates_datetime, prediction_dict, matches, unmatched_pred, 'pred')
+                    fronts_by_date_gt = collect_tracking_fronts_by_date(input_dates_datetime, groundtruth_dict, matches, unmatched_gt, 'gt')
+                    
+                    plot_tracking_grid_gap(input_dates_datetime_plot,
+                                    input_imgs,
+                                    fronts_by_date,
+                                    fronts_by_date_gt,
+                                    save_path=ml_path+'results_science/'+date_str+'/'+'operational_tracking_imgs_'+start+'_'+end+'_'+mdl+path_append,
+                                    gap=3,
+                                    segmentation_dictionary=segmentation_dictionary,
+                                    use_threshold=use_threshold,
+                                    img_size=img_size)
 
 
 if __name__ == '__main__':
@@ -547,9 +553,14 @@ if __name__ == '__main__':
     time_pairs = config['time_pairs']
     timepairs = [{'start': time_pairs['start'][i], 'end': time_pairs['end'][i]} for i in range(len(time_pairs['start']))]
 
-    dates_plotting_operational = config['dates_plotting_operational']
-    years_plotting_operational = list(dates_plotting_operational.keys())
-    months_plotting_operational = [dates_plotting_operational[year] for year in years_plotting_operational]
+    if 'dates_plotting_operational' not in config or not config['dates_plotting_operational']:
+        dates_plotting_operational = None
+        years_plotting_operational = None
+        months_plotting_operational = None
+    else:
+        dates_plotting_operational = config['dates_plotting_operational']
+        years_plotting_operational = list(dates_plotting_operational.keys())
+        months_plotting_operational = [dates_plotting_operational[year] for year in years_plotting_operational]
 
     date_str = None
 

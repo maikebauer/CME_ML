@@ -105,7 +105,7 @@ def main(mdls, ml_path, date_str, mode='test', methods=['median', 'mean', 'max']
     max_recalls = np.zeros(len(methods))
     max_dices = np.zeros(len(methods))
 
-    folder_save = ml_path + '/results_science/' + date_str + '/'
+    folder_save = ml_path + 'results_science/' + date_str + '/'
 
     if not os.path.exists(folder_save):
         os.makedirs(folder_save)
@@ -219,30 +219,21 @@ def main(mdls, ml_path, date_str, mode='test', methods=['median', 'mean', 'max']
 
         # Adjust layout and save the figure
         plt.tight_layout()
-        plt.savefig(folder_save+'segmentation_curves_science.png', dpi=300, bbox_inches='tight', pad_inches=0.1)
+        plt.savefig(folder_save+'segmentation_curves_science.jpg', dpi=300, bbox_inches='tight', pad_inches=0.1)
         plt.close()
         #plt.show()
 
-        # best_paths = []
         best_path = ml_path + best_mdl + '/segmentation_masks_'+best_method+'_'+mode+'.npz'
-        # for mdl in mdls:
-        #     best_paths.append(ml_path + mdl + '/segmentation_masks_'+best_method+'_'+mode+'.npz')
 
-        # my_path = best_paths[0]
 
         filenames, pred, gt = load_results(best_path, load_gt=True)
         filenames = [rdif_path+f.decode('utf-8') for f in filenames]
 
         pred_processed = post_processing(pred, t=best_threshold, return_labeled=False)
 
-        TP_img = np.logical_and(pred_processed == 1, gt == 1).astype(int)
-        FP_img = np.logical_and(pred_processed == 1, gt == 0).astype(int)
-        FN_img = np.logical_and(pred_processed == 0, gt ==  1).astype(int)
-
-        if(img_size!=128):
-            TP_img = transform.resize(np.flipud(TP_img), (img_size,img_size)).astype(int)
-            FP_img = transform.resize(np.flipud(FP_img), (img_size,img_size)).astype(int) 
-            FN_img =transform.resize(np.flipud(FN_img), (img_size,img_size)).astype(int) 
+        TP_img = np.logical_and(pred_processed == 1, gt == 1)
+        FP_img = np.logical_and(pred_processed == 1, gt == 0)
+        FN_img = np.logical_and(pred_processed == 0, gt ==  1)
 
         imgs = []
 
@@ -274,10 +265,9 @@ def main(mdls, ml_path, date_str, mode='test', methods=['median', 'mean', 'max']
 
         # wspace = 0
         # hspace = 0
-        fac = 2
+        fac = 0.3
 
         for init in indices:
-
             plot_images = imgs[init:init+win_size*3][::gap]
             plt_tp = TP_img[init:init+win_size*3][::gap]
             plt_fp = FP_img[init:init+win_size*3][::gap]
@@ -292,10 +282,21 @@ def main(mdls, ml_path, date_str, mode='test', methods=['median', 'mean', 'max']
                     # Calculate the row and column indices for the current image
                     row = i // c
                     col = i % c
+
+                    if(img_size!=128):
+                        tp = transform.resize(np.flipud(plt_tp[i]), (img_size,img_size)).astype(int)
+                        fp = transform.resize(np.flipud(plt_fp[i]), (img_size,img_size)).astype(int) 
+                        fn = transform.resize(np.flipud(plt_fn[i]), (img_size,img_size)).astype(int)
+                    
+                    else:
+                        tp = np.flipud(plt_tp[i]).astype(int)
+                        fp = np.flipud(plt_fp[i]).astype(int)
+                        fn = np.flipud(plt_fn[i]).astype(int)
+
                     axes[row, col].imshow(np.flipud(image), aspect='equal', cmap='gray', interpolation='none', vmin=np.nanmedian(image)-fac*np.nanstd(image), vmax=np.nanmedian(image)+fac*np.nanstd(image))
-                    axes[row, col].imshow(np.flipud(plt_tp[i]), cmap=cmap_tp, alpha=0.5, interpolation='none')
-                    axes[row, col].imshow(np.flipud(plt_fp[i]), cmap=cmap_fp, alpha=0.5, interpolation='none')
-                    axes[row, col].imshow(np.flipud(plt_fn[i]), cmap=cmap_fn, alpha=0.5, interpolation='none')
+                    axes[row, col].imshow(tp, cmap=cmap_tp, alpha=0.5, interpolation='none')
+                    axes[row, col].imshow(fp, cmap=cmap_fp, alpha=0.5, interpolation='none')
+                    axes[row, col].imshow(fn, cmap=cmap_fn, alpha=0.5, interpolation='none')
                     axes[row, col].axis('off')
                     
                     # Add text in the top middle of each image (not as a title)
@@ -317,7 +318,7 @@ def main(mdls, ml_path, date_str, mode='test', methods=['median', 'mean', 'max']
                 if not os.path.exists(folder_save_imgs):
                     os.makedirs(folder_save_imgs)
                 
-                plt.savefig(folder_save_imgs+filenames[init].split('/')[-1].split('.')[0] + '.png', dpi=300, bbox_inches='tight',pad_inches=0.0)
+                plt.savefig(folder_save_imgs+filenames[init].split('/')[-1].split('.')[0] + '.jpg', dpi=300, bbox_inches='tight',pad_inches=0.0)
                 plt.close()
 
 if __name__ == "__main__":
@@ -335,5 +336,5 @@ if __name__ == "__main__":
 
     now = datetime.now()
     date_str = now.strftime("%Y%m%d_%H%M%S")
-    
+
     main(mdls=mdls_event_based, ml_path=ml_path, date_str=date_str, mode=mode, methods=methods, plotting=plotting, rdif_path=rdif_path, img_size=config['img_size'])

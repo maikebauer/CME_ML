@@ -253,6 +253,7 @@ def plot_segmentation_and_tracking_grid_gap(
     num_figs = math.ceil(total / num_per_fig)
     figsize = (num_cols * 2, num_rows * 2)
 
+    fac = 0.25
     for i in range(num_figs):
         fig, axes = plt.subplots(num_rows, num_cols, figsize=figsize)
         fig.subplots_adjust(wspace=0, hspace=0, left=0, right=1, top=1, bottom=0)
@@ -274,12 +275,18 @@ def plot_segmentation_and_tracking_grid_gap(
             fronts = fronts_by_date.get(dt, [])
 
             ax = axes[j]
-            ax.imshow(np.flipud(img), aspect='equal', cmap='gray', vmin=np.nanmedian(img)-0.35*np.nanstd(img), vmax=np.nanmedian(img)+0.35*np.nanstd(img), extent=(0, img.shape[1], img.shape[0], 0),interpolation='none')
+            ax.imshow(np.flipud(img), aspect='equal', cmap='gray', vmin=np.nanmedian(img)-fac*np.nanstd(img), vmax=np.nanmedian(img)+fac*np.nanstd(img), extent=(0, img.shape[1], img.shape[0], 0),interpolation='none')
 
             if(img_size!=128):
                 tp = transform.resize(np.flipud(seg_res['tp']), (img_size,img_size)).astype(int)
                 fp = transform.resize(np.flipud(seg_res['fp']), (img_size,img_size)).astype(int) 
-                fn =transform.resize(np.flipud(seg_res['fn']), (img_size,img_size)).astype(int) 
+                fn = transform.resize(np.flipud(seg_res['fn']), (img_size,img_size)).astype(int)
+            
+            else:
+                tp = np.flipud(seg_res['tp']).astype(int)
+                fp = np.flipud(seg_res['fp']).astype(int)
+                fn = np.flipud(seg_res['fn']).astype(int)
+
             # Segmentation overlays
             ax.imshow(tp, cmap=cmap_tp, alpha=0.4, interpolation='none', extent=(0, img.shape[1], img.shape[0], 0))
             ax.imshow(fp, cmap=cmap_fp, alpha=0.4, interpolation='none', extent=(0, img.shape[1], img.shape[0], 0))
@@ -334,7 +341,6 @@ def main(mdls, ml_path, best_method, best_threshold, date_str, mode='test', plot
     filenames_final = []
 
     folder_save = ml_path + 'results_science/' + date_str + '/'
-    # folder_save = '/home/lelouedec/testml/results_science/' + date_str + '/'
     
     os.makedirs(folder_save, exist_ok=True)
 

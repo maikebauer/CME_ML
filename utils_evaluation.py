@@ -349,6 +349,126 @@ class UnionFind:
         if root_x != root_y:
             self.parent[root_y] = root_x
 
+def aggregate_fronts_sequential(fronts, fronts_pixels, max_diff_elon=3, areas=None):
+
+    n = len(fronts)
+
+    if n <= 1:
+        if areas is not None:
+            return fronts, fronts_pixels, areas
+        else:
+            return fronts, fronts_pixels
+
+    max_elons = [np.max(f[1]) if len(f[1]) > 0 else -999 for f in fronts]
+
+    sorted_indices = np.argsort(max_elons)[::-1]  # Descending order
+
+    used = set()
+    discarded = set()
+
+    groups = []
+
+    for i in sorted_indices:
+        if i in used or i in discarded:
+            continue
+        
+        if len(fronts[i][1]) == 0:
+            # print(f"Front {i} has no elongation data, skipping.")
+            discarded.add(i)
+            continue
+        # Start a new group with front i
+        group = [i]
+        used.add(i)
+
+        # Aggregate data for matching
+        combined_elon = fronts[i][1].copy()
+        combined_pa = fronts[i][0].copy()
+
+        changed = True
+        while changed:
+            changed = False
+            for j in range(n):
+                if j in used or j in discarded:
+                    continue
+                
+                if len(fronts[j][1]) == 0:
+                    # print(f"Front {j} has no elongation data, skipping.")
+                    discarded.add(j)
+                    continue
+                
+                # diff = np.abs(np.max(fronts[j][1]) - np.max(combined_elon))
+                diff = np.abs(np.mean(fronts[j][1]) - np.mean(combined_elon))
+                if diff <= max_diff_elon:
+                    # Add to group
+                    group.append(j)
+                    used.add(j)
+                    combined_elon = np.concatenate((combined_elon, fronts[j][1]))
+                    combined_pa = np.concatenate((combined_pa, fronts[j][0]))
+                    changed = True
+
+        groups.append(group)
+
+    # Now build the aggregated outputs
+    img_fronts_agg = []
+    img_fronts_pixels_agg = []
+    img_fronts_areas_agg = [] if areas is not None else None
+
+    for group in groups:
+        elon_group = []
+        pa_group = []
+        x_pix_group = []
+        y_pix_group = []
+        areas_group = []
+
+        for idx in group:
+            elon_group.append(fronts[idx][1])
+            pa_group.append(fronts[idx][0])
+            x_pix_group.append(fronts_pixels[idx][0])
+            y_pix_group.append(fronts_pixels[idx][1])
+            if areas is not None:
+                areas_group.append(areas[idx])
+
+        elon_group = np.concatenate(elon_group)
+        pa_group = np.concatenate(pa_group)
+        x_pix_group = np.concatenate(x_pix_group)
+        y_pix_group = np.concatenate(y_pix_group)
+
+        # Keep only largest elongation per PA
+        keep_indices = []
+        unique_pas = np.unique(pa_group)
+        for pa in unique_pas:
+            indices = np.where(pa_group == pa)[0]
+            if len(indices) == 1:
+                keep_indices.append(indices[0])
+            else:
+                max_idx = indices[np.argmax(elon_group[indices])]
+                keep_indices.append(max_idx)
+
+        keep_indices = np.array(keep_indices)
+        elon_group = elon_group[keep_indices]
+        pa_group = pa_group[keep_indices]
+        x_pix_group = x_pix_group[keep_indices]
+        y_pix_group = y_pix_group[keep_indices]
+
+        # Sort by PA
+        sort_idx = np.argsort(pa_group)
+        elon_group = elon_group[sort_idx]
+        pa_group = pa_group[sort_idx]
+        x_pix_group = x_pix_group[sort_idx]
+        y_pix_group = y_pix_group[sort_idx]
+
+        img_fronts_agg.append([pa_group, elon_group])
+        img_fronts_pixels_agg.append([x_pix_group, y_pix_group])
+
+        if areas is not None:
+            total_area = np.sum(areas_group, axis=0)
+            img_fronts_areas_agg.append(total_area)
+
+    if areas is not None:
+        return img_fronts_agg, img_fronts_pixels_agg, img_fronts_areas_agg
+    else:
+        return img_fronts_agg, img_fronts_pixels_agg
+    
 def aggregate_fronts(fronts, fronts_pixels, max_diff_elon=3, areas=None):
     """
     Groups CME fronts that likely belong to the same CME.
@@ -498,7 +618,7 @@ def identify_new_cme(associated_fronts, threshold_elon=8):
             flags.append(0)
     return flags
 
-def connect_cmes_new(input_imgs, input_dates, img_front_wcs, img_front_pixels, input_dates_obs, labeled_areas=None, max_time_gap=140):
+def connect_cmes_new(input_imgs, input_dates, img_front_wcs, img_front_pixels, input_dates_obs, labeled_areas=None, max_time_gap=140, max_start_elon=7.3, min_elon_end=12.9, elon_diff_thresholds=[-3.2,6.7], min_total_duration=None):
 
     previous_date = input_dates[0]
     previous_fronts = []
@@ -529,7 +649,7 @@ def connect_cmes_new(input_imgs, input_dates, img_front_wcs, img_front_pixels, i
         else:
             current_fronts, current_fronts_pix = aggregate_fronts(img_front_wcs[idx], img_front_pixels[idx], max_diff_elon=3)
         
-        new_cme_flag = identify_new_cme(current_fronts, threshold_elon=8)
+        new_cme_flag = identify_new_cme(current_fronts, threshold_elon=max_start_elon)
         current_cme_keys = []
 
         #print('delta_t', delta_t)
@@ -569,7 +689,7 @@ def connect_cmes_new(input_imgs, input_dates, img_front_wcs, img_front_pixels, i
                         weight = np.sum(shared_mask) / len(all_pas)
                         weighted_diff = abs_mean_diff * (1 - weight)
 
-                        if -2 <= mean_diff <= 7:
+                        if elon_diff_thresholds[0] <= mean_diff <= elon_diff_thresholds[1]:
                             elongation_differences[i].append((j, weighted_diff))
 
             best_matches = []
@@ -663,16 +783,17 @@ def connect_cmes_new(input_imgs, input_dates, img_front_wcs, img_front_pixels, i
             current_fronts = []
             previous_cme_keys = []
 
-    for entry in list(cme_dictionary):
-        time_beginning = sorted(list(set(cme_dictionary[entry]['times'])))[0]
-        time_end = sorted(list(set(cme_dictionary[entry]['times'])))[-1]
-        time_diff = (time_end - time_beginning).total_seconds()/3600 # total duration of CME in hours
+    if min_total_duration is not None:
+        for entry in list(cme_dictionary):
+            time_beginning = sorted(list(set(cme_dictionary[entry]['times'])))[0]
+            time_end = sorted(list(set(cme_dictionary[entry]['times'])))[-1]
+            time_diff = (time_end - time_beginning).total_seconds()/3600 # total duration of CME in hours
 
-        if time_diff < 7:
-            del cme_dictionary[entry]
+            if time_diff < min_total_duration:
+                del cme_dictionary[entry]
 
     for entry in list(cme_dictionary):
-        if np.nanmax(cme_dictionary[entry]['cme_front_wcs'][-1][1]) < 10: #if maximum elongation reached is below 10
+        if np.nanmax(cme_dictionary[entry]['cme_front_wcs'][-1][1]) < min_elon_end: #if maximum elongation reached is below threshold
             del cme_dictionary[entry]
 
     # Merge duplicate timestep entries
@@ -1433,7 +1554,7 @@ def get_ml_gt_beacon(cme_dict_gt_science, filenames):
 
     return cme_dict_gt_beacon_test
 
-def match_cmes_extra(ground_truth_cmes, predicted_cmes, time_threshold=6):
+def match_cmes_extra(ground_truth_cmes, predicted_cmes, time_threshold=200):
     Range = namedtuple('Range', ['start', 'end'])
     pred_names = list(predicted_cmes.keys())
     gt_names = list(ground_truth_cmes.keys())
@@ -1454,7 +1575,7 @@ def match_cmes_extra(ground_truth_cmes, predicted_cmes, time_threshold=6):
             gt_data = ground_truth_cmes[gt_name]
             gt_start = gt_data['time_start']
 
-            time_diff = abs((pred_start - gt_start).total_seconds()) / 3600
+            time_diff = abs((pred_start - gt_start).total_seconds()) / 60
             
             if time_diff > time_threshold:
                 continue

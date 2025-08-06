@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/715014067.svg)](https://doi.org/10.5281/zenodo.16753562)
+
 # Solar Transient Recognition Using Deep Learning (STRUDL)
 
 Code for the various components of the STRUDL model. A list of Python packages used to generate the results in the STRUDL paper can be found in `requirements.txt`.

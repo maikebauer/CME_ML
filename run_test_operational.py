@@ -4,7 +4,6 @@ import numpy as np
 import sys
 from dataset import RundifSequence_Test
 from utils import load_model, parse_yml
-from torchvision.transforms import v2
 import matplotlib.pyplot as plt
 import datetime
 import matplotlib as mpl

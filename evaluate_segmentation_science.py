@@ -1,12 +1,7 @@
 import numpy as np
 import os
 from datetime import datetime
-from skimage.morphology import disk
-from scipy import ndimage
-from skimage.measure import label
-from skimage import morphology, feature, filters, transform
-import astropy.io.fits as fits
-from astropy import wcs
+from skimage import transform
 from astropy.wcs import FITSFixedWarning
 import warnings
 import sys
@@ -14,10 +9,6 @@ import matplotlib.pyplot as plt
 warnings.simplefilter('ignore', category=FITSFixedWarning)
 from matplotlib import colors
 from utils import parse_yml
-from pycocotools import coco
-from PIL import Image
-from collections import namedtuple
-from scipy.optimize import linear_sum_assignment
 from utils_evaluation import load_results, post_processing
 from evaluation import IoU, precision_recall, dice
 

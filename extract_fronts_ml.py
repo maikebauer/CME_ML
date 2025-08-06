@@ -1,7 +1,5 @@
 import numpy as np
 import datetime
-from skimage.morphology import disk
-from skimage.measure import label
 from astropy.wcs import FITSFixedWarning
 import warnings
 from utils_evaluation import load_results, post_processing, get_fitsfiles, get_outline, get_front, connect_cmes_new, remove_outliers_from_fronts,get_cmes,get_ml_gt, clean_cme_elongation_tracks

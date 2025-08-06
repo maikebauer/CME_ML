@@ -4,7 +4,7 @@ import datetime
 from skimage.morphology import disk
 from scipy import ndimage
 from skimage.measure import label
-from skimage import morphology, feature
+from skimage import morphology
 import astropy.io.fits as fits
 from astropy import wcs
 from astropy.wcs import FITSFixedWarning

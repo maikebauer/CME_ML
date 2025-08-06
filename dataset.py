@@ -1,17 +1,13 @@
 import torch
-import torch.nn.functional as F
 from torch.utils.data import Dataset
 from PIL import Image
 from pycocotools import coco
-import matplotlib.pyplot as plt 
 import numpy as np
 from torchvision.transforms import v2
 import sys
 import os
 from skimage.morphology import binary_dilation, disk
 from numpy.random import default_rng
-import cv2
-from scipy.ndimage.measurements import label
 from scipy import ndimage
 from utils import sep_noevent_data, check_diff
 import random
@@ -1098,7 +1094,7 @@ class FlowSet(Dataset):
             im = np.asarray(Image.open(path+img_file_name).convert("L"))
 
             if self.width_par != 1024:
-                im = cv2.resize(im  , (self.width_par , height_par),interpolation = cv2.INTER_CUBIC)
+                im = transform.resize(im  , (self.width_par , height_par))
 
             GT = []
             annotations = self.coco_obj.getAnnIds(imgIds=img_id)
@@ -1113,7 +1109,7 @@ class FlowSet(Dataset):
             
             if self.width_par != 1024:
                 for i in range(len(GT)):
-                    GT[i] = cv2.resize(GT[i]  , (self.width_par , height_par),interpolation = cv2.INTER_CUBIC)
+                    GT[i] = transform.resize(GT[i]  , (self.width_par , height_par))
 
             dilation = False
 
@@ -1360,7 +1356,7 @@ class BasicSet(Dataset):
         im = np.asarray(Image.open(path+img_file_name).convert("L"))
 
         if self.width_par != 1024:
-            im = cv2.resize(im  , (self.width_par , height_par),interpolation = cv2.INTER_CUBIC)
+            im = transform.resize(im  , (self.width_par , height_par))
 
         GT = []
         annotations = self.coco_obj.getAnnIds(imgIds=img_id)
@@ -1375,7 +1371,7 @@ class BasicSet(Dataset):
         
         if self.width_par != 1024:
             for i in range(len(GT)):
-                GT[i] = cv2.resize(GT[i]  , (self.width_par , height_par), interpolation = cv2.INTER_CUBIC)
+                GT[i] = transform.resize(GT[i]  , (self.width_par , height_par))
 
         dilation = False
 

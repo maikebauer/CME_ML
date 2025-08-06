@@ -9,13 +9,8 @@ import copy
 from dataset import RundifSequence, RundifSequenceNew
 from evaluation import evaluate_onec_slide, Kappa_cohen, precision_recall, IoU, dice, Accuracy
 from torch.utils.tensorboard import SummaryWriter
-import json
-from monai.losses.dice import DiceLoss
-import io
-import matplotlib.pyplot as plt
 from torchvision.transforms import GaussianBlur
 from utils import image_grid, parse_yml, load_augmentations, load_model, load_optimizer, load_scheduler, load_loss
-import yaml
 import shutil
 
 def train():

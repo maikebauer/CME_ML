@@ -2,7 +2,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from monai.losses.dice import DiceLoss
-import matplotlib.pyplot as plt
+
 def charbonnier_loss(delta, gamma=0.45, epsilon=1e-6):
     """
     Robust Charbonnier loss, as defined in equation (4) of the paper.

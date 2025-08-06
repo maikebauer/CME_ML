@@ -67,6 +67,8 @@ compare_ssw_cnn_copy.py
 run_job.sh
 config_evaluation.yaml
 *.ipynb
+poetry.lock
+pyproject.toml
 
 # Folders to ignore #
 ###################
